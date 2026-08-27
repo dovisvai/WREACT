@@ -1,0 +1,33 @@
+{
+  "appId": "com.wreact.app",
+  "appName": "WREACT",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "cleartext": true,
+    "androidScheme": "https",
+    "iosScheme": "https"
+  },
+  "ios": {
+    "contentInset": "always",
+    "scheme": "wreact",
+    "limitsNavigationsToAppBoundDomains": true
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1500,
+      "backgroundColor": "#020b1c",
+      "showSpinner": false
+    },
+    "Purchases": {
+      "apiKey": "appl_wreact_shipathon_demo_key"
+    },
+    "Haptics": {
+      "enabled": true
+    },
+    "StatusBar": {
+      "style": "DARK",
+      "backgroundColor": "#020b1c"
+    }
+  }
+}

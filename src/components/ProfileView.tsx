@@ -21,8 +21,13 @@ import {
   X,
   Lock,
   Smartphone,
-  Globe
+  Globe,
+  Trash2,
+  FileText,
+  AlertTriangle
 } from 'lucide-react';
+import { AccountDeletionModal } from './AccountDeletionModal';
+import { LegalModal } from './LegalModal';
 
 interface ProfileViewProps {
   profile: UserProfile;
@@ -30,6 +35,7 @@ interface ProfileViewProps {
   openAuthModal: () => void;
   openMonetizationModal: () => void;
   openOnboarding?: () => void;
+  onDeleteAccount?: () => void;
 }
 
 export const ProfileView: React.FC<ProfileViewProps> = ({
@@ -38,12 +44,16 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   openAuthModal,
   openMonetizationModal,
   openOnboarding,
+  onDeleteAccount,
 }) => {
   const [activeTab, setActiveTab] = useState<'STATS' | 'BADGES' | 'AUDIO'>('STATS');
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(profile.username);
   const [selectedCountry, setSelectedCountry] = useState(profile.country);
   const [selectedAvatar, setSelectedAvatar] = useState(profile.avatar);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isLegalModalOpen, setIsLegalModalOpen] = useState(false);
+  const [legalModalTab, setLegalModalTab] = useState<'PRIVACY' | 'TERMS' | 'EULA'>('PRIVACY');
 
   const { playHapticSound } = useHapticSound({ enabled: true, volume: 0.3 });
 
@@ -144,70 +154,75 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   ];
 
   return (
-    <div className="flex flex-col h-full bg-[#020b1c] text-white select-none p-3.5 md:p-4 overflow-y-auto space-y-3.5">
+    <div className="flex flex-col h-full bg-[#020b1c] text-white select-none p-3 md:p-4 overflow-y-auto pb-28 space-y-4">
       
-      {/* Red Bull Digital Athlete Pass Header Card */}
-      <div className="relative bg-gradient-to-br from-[#00183d] via-[#00122e] to-[#020b1c] border-2 border-red-500/50 rounded-3xl p-4 md:p-5 shadow-2xl overflow-hidden">
-        {/* Decorative Glows */}
-        <div className="absolute top-0 right-0 w-44 h-44 bg-red-600/15 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 left-0 w-36 h-36 bg-yellow-400/10 rounded-full blur-2xl pointer-events-none" />
+      {/* Formula 1 / Athlete Superlicense Header Card */}
+      <div className="relative bg-gradient-to-br from-[#00183d] via-[#00122e] to-[#020b1c] border-2 border-red-500/50 rounded-3xl p-4 sm:p-5 shadow-2xl overflow-hidden">
+        {/* Ambient Glows */}
+        <div className="absolute top-0 right-0 w-48 h-48 bg-red-600/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-0 w-40 h-40 bg-yellow-400/10 rounded-full blur-2xl pointer-events-none" />
 
-        {/* Top Digital ID Badge Banner */}
-        <div className="flex items-center justify-between pb-3 mb-3 border-b border-[#12284c]/80 relative z-10">
+        {/* Top Digital Pass Badge Banner */}
+        <div className="flex items-center justify-between pb-3 mb-3.5 border-b border-[#12284c] relative z-10">
           <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
-            <span className="text-[10px] font-black uppercase tracking-wider text-yellow-400 font-mono">
+            <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_#ef4444]" />
+            <span className="text-[11px] font-black uppercase tracking-wider text-yellow-400 font-mono">
               WREACT LAB • ATHLETE PASS
             </span>
           </div>
-          <span className="text-[10px] font-mono font-bold text-slate-400">
+          <span className="text-[10px] font-mono font-bold text-slate-400 bg-[#020b1c] px-2 py-0.5 rounded-md border border-[#12284c]">
             ID: W-ATHLETE-{profile.id ? profile.id.slice(0, 5).toUpperCase() : '8924'}
           </span>
         </div>
 
         {/* Profile Identity Details */}
-        <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 relative z-10">
-          {/* Glowing Avatar Frame */}
+        <div className="flex items-center gap-3.5 sm:gap-4 relative z-10">
+          {/* Avatar Frame */}
           <div className="relative shrink-0">
-            <div className={`w-20 h-20 rounded-2xl bg-[#020b1c] border-2 ${profile.proPassActive ? 'border-yellow-400 shadow-yellow-400/30' : 'border-red-500/60'} shadow-xl flex items-center justify-center text-4xl relative overflow-hidden`}>
+            <div className={`w-18 h-18 sm:w-20 sm:h-20 rounded-2xl bg-[#020b1c] border-2 ${
+              profile.proPassActive ? 'border-yellow-400 shadow-[0_0_15px_rgba(250,204,21,0.3)]' : 'border-red-500/70 shadow-lg'
+            } flex items-center justify-center text-3xl sm:text-4xl relative overflow-hidden`}>
               <div className="absolute inset-0 bg-gradient-to-b from-white/10 to-transparent pointer-events-none" />
               <span>{profile.avatar}</span>
             </div>
             {/* Country Flag Badge */}
-            <span className="absolute -bottom-1 -right-1 text-2xl shadow-md bg-[#00122e] rounded-lg px-1 border border-[#12284c]" title={getCountryName(profile.country)}>
+            <span
+              className="absolute -bottom-1 -right-1 text-xl shadow-md bg-[#00122e] rounded-lg px-1.5 py-0.5 border border-[#12284c] leading-none"
+              title={getCountryName(profile.country)}
+            >
               {getCountryFlag(profile.country)}
             </span>
           </div>
 
-          {/* User Info & Verification */}
-          <div className="flex-1 text-center sm:text-left space-y-1">
-            <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
-              <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-1.5">
-                {profile.username}
+          {/* User Info */}
+          <div className="flex-1 min-w-0 space-y-1">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <h1 className="text-lg sm:text-xl font-black text-white tracking-tight break-words flex items-center gap-1.5">
+                <span>{profile.username}</span>
                 {profile.isLoggedIn && (
-                  <CheckCircle2 className="w-5 h-5 text-yellow-400 inline shrink-0" title="Verified WREACT Athlete" />
+                  <CheckCircle2 className="w-4 h-4 text-yellow-400 shrink-0 fill-yellow-400/20" title="Verified WREACT Athlete" />
                 )}
               </h1>
               {profile.proPassActive && (
-                <span className="px-2 py-0.5 rounded-full bg-gradient-to-r from-red-600 to-yellow-400 text-slate-950 font-black text-[9px] uppercase tracking-wider border border-yellow-300 shadow-md">
-                  VIP PRO PASS
+                <span className="px-2 py-0.5 rounded-full bg-gradient-to-r from-red-600 to-yellow-400 text-slate-950 font-black text-[9px] uppercase tracking-wider border border-yellow-300 shadow-sm shrink-0">
+                  VIP PRO
                 </span>
               )}
             </div>
 
-            <p className="text-xs text-slate-300 font-bold flex items-center justify-center sm:justify-start gap-1">
+            <div className="flex items-center gap-1.5 text-xs text-slate-300 font-bold">
               <span>WREACT Athlete</span>
-              <span>•</span>
-              <span className="text-yellow-400 font-mono">{getCountryName(profile.country)}</span>
-            </p>
+              <span className="text-slate-500">•</span>
+              <span className="text-yellow-400 font-mono font-black">{getCountryName(profile.country)}</span>
+            </div>
 
-            <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 pt-1 text-[11px]">
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-[#020b1c] border border-[#12284c] text-slate-300 font-medium">
+            <div className="flex items-center gap-2 pt-0.5 text-[11px] flex-wrap">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#020b1c] border border-[#12284c] text-slate-300 font-medium">
                 <ShieldCheck className="w-3.5 h-3.5 text-yellow-400" />
-                {profile.isLoggedIn ? (profile.email || 'Verified Account') : 'Guest Account'}
+                {profile.isLoggedIn ? (profile.email || 'Cloud Verified') : 'Guest Athlete'}
               </span>
               {ratingInfo && (
-                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-red-600/20 border border-red-500/40 text-yellow-300 font-black">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-red-600/20 border border-red-500/40 text-yellow-300 font-black">
                   <span>{ratingInfo.icon}</span>
                   <span>{ratingInfo.rating}</span>
                 </span>
@@ -217,84 +232,88 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </div>
 
         {/* Action Buttons Row */}
-        <div className="mt-4 pt-3 border-t border-[#12284c]/80 flex flex-wrap items-center justify-between gap-2 relative z-10">
+        <div className="mt-4 pt-3 border-t border-[#12284c] grid grid-cols-3 gap-2 relative z-10">
           <button
+            type="button"
             onClick={() => setEditing(true)}
-            className="flex-1 min-w-[120px] py-2 px-3 rounded-xl bg-[#020b1c] hover:bg-[#12284c] text-yellow-400 border border-yellow-400/40 text-xs font-black flex items-center justify-center gap-1.5 transition-all active:scale-95 shadow-md"
+            className="py-2 px-2 rounded-xl bg-[#020b1c] hover:bg-[#12284c] text-yellow-400 border border-yellow-400/40 text-[11px] font-black flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm"
           >
-            <Edit3 className="w-3.5 h-3.5" /> Edit Profile
+            <Edit3 className="w-3.5 h-3.5" />
+            <span>Edit</span>
           </button>
 
           <button
+            type="button"
             onClick={openAuthModal}
-            className={`flex-1 min-w-[120px] py-2 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all active:scale-95 shadow-md ${
+            className={`py-2 px-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm ${
               profile.isLoggedIn
                 ? 'bg-[#020b1c] hover:bg-[#12284c] text-slate-200 border border-[#12284c]'
-                : 'bg-red-600 hover:bg-red-500 text-white border border-yellow-400/40 shadow-red-600/20'
+                : 'bg-red-600 hover:bg-red-500 text-white border border-yellow-400/40'
             }`}
           >
             <ShieldCheck className="w-3.5 h-3.5 text-yellow-400" />
-            {profile.isLoggedIn ? 'Manage Account' : 'Sign In / Sync'}
+            <span>{profile.isLoggedIn ? 'Account' : 'Sign In'}</span>
           </button>
 
           <button
+            type="button"
             onClick={openMonetizationModal}
-            className="py-2 px-3 rounded-xl bg-yellow-400 hover:bg-yellow-300 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition-all active:scale-95 shadow-md"
+            className="py-2 px-2 rounded-xl bg-yellow-400 hover:bg-yellow-300 text-slate-950 font-black text-[11px] flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm"
           >
             <Sparkles className="w-3.5 h-3.5 fill-current" />
-            <span>{profile.proPassActive ? 'VIP Active' : 'VIP Pro Pass'}</span>
+            <span>{profile.proPassActive ? 'VIP Pass' : 'Get VIP'}</span>
           </button>
         </div>
       </div>
 
-      {/* Profile Sub-Tab Navigation Bar */}
-      <div className="flex items-center gap-1 bg-[#00122e] p-1 rounded-2xl border border-[#12284c] text-xs">
+      {/* Sub-Tab Navigation Bar */}
+      <div className="flex items-center gap-1.5 bg-[#00122e] p-1.5 rounded-2xl border border-[#12284c] text-xs">
         <button
+          type="button"
           onClick={() => { playHapticSound('tick'); setActiveTab('STATS'); }}
-          className={`flex-1 py-2 px-2 rounded-xl font-black transition-all flex items-center justify-center gap-1 ${
+          className={`flex-1 py-2 px-2 rounded-xl font-black transition-all flex items-center justify-center gap-1.5 ${
             activeTab === 'STATS'
-              ? 'bg-red-600 text-white shadow-md border border-yellow-400/40'
+              ? 'bg-red-600 text-white shadow-md border border-yellow-400/50'
               : 'text-slate-400 hover:text-white'
           }`}
         >
-          <BarChart3 className="w-3.5 h-3.5 text-yellow-400" />
-          <span className="hidden sm:inline">Stats & Rank</span>
-          <span className="sm:hidden">Stats</span>
+          <BarChart3 className="w-4 h-4 text-yellow-400" />
+          <span>Stats & Rank</span>
         </button>
 
         <button
+          type="button"
           onClick={() => { playHapticSound('tick'); setActiveTab('BADGES'); }}
-          className={`flex-1 py-2 px-2 rounded-xl font-black transition-all flex items-center justify-center gap-1 ${
+          className={`flex-1 py-2 px-2 rounded-xl font-black transition-all flex items-center justify-center gap-1.5 ${
             activeTab === 'BADGES'
-              ? 'bg-red-600 text-white shadow-md border border-yellow-400/40'
+              ? 'bg-red-600 text-white shadow-md border border-yellow-400/50'
               : 'text-slate-400 hover:text-white'
           }`}
         >
-          <Award className="w-3.5 h-3.5 text-yellow-400" />
-          <span className="hidden sm:inline">Badges ({BADGES.filter(b => b.unlocked).length})</span>
-          <span className="sm:hidden">Badges</span>
+          <Award className="w-4 h-4 text-yellow-400" />
+          <span>Badges ({BADGES.filter(b => b.unlocked).length})</span>
         </button>
 
         <button
+          type="button"
           onClick={() => { playHapticSound('tick'); setActiveTab('AUDIO'); }}
-          className={`flex-1 py-2 px-2 rounded-xl font-black transition-all flex items-center justify-center gap-1 ${
+          className={`flex-1 py-2 px-2 rounded-xl font-black transition-all flex items-center justify-center gap-1.5 ${
             activeTab === 'AUDIO'
-              ? 'bg-red-600 text-white shadow-md border border-yellow-400/40'
+              ? 'bg-red-600 text-white shadow-md border border-yellow-400/50'
               : 'text-slate-400 hover:text-white'
           }`}
         >
-          <Volume2 className="w-3.5 h-3.5 text-yellow-400" />
-          <span className="hidden sm:inline">Sound Lab</span>
-          <span className="sm:hidden">Audio</span>
+          <Volume2 className="w-4 h-4 text-yellow-400" />
+          <span>Sound Lab</span>
         </button>
       </div>
 
       {/* TAB 1: OVERVIEW & STATS */}
       {activeTab === 'STATS' && (
-        <div className="space-y-3.5 animate-fade-in">
+        <div className="space-y-4 animate-fade-in">
           {/* 4 Hero KPI Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-            <div className="bg-[#00122e] border border-yellow-400/40 rounded-2xl p-3.5 relative overflow-hidden flex flex-col justify-between">
+            <div className="bg-[#00122e] border border-yellow-400/40 rounded-2xl p-3.5 relative overflow-hidden flex flex-col justify-between shadow-lg">
               <div className="flex items-center justify-between text-yellow-400 mb-1">
                 <span className="text-[10px] font-black uppercase tracking-wider text-slate-300">Personal Best</span>
                 <Zap className="w-4 h-4 fill-current text-yellow-400" />
@@ -307,7 +326,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               </span>
             </div>
 
-            <div className="bg-[#00122e] border border-red-500/30 rounded-2xl p-3.5 flex flex-col justify-between">
+            <div className="bg-[#00122e] border border-red-500/30 rounded-2xl p-3.5 flex flex-col justify-between shadow-lg">
               <div className="flex items-center justify-between text-red-500 mb-1">
                 <span className="text-[10px] font-black uppercase tracking-wider text-slate-300">Tests Completed</span>
                 <Activity className="w-4 h-4 text-red-500" />
@@ -318,7 +337,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               <span className="text-[10px] text-slate-400 font-medium mt-1">Reflex Trials Run</span>
             </div>
 
-            <div className="bg-[#00122e] border border-red-500/30 rounded-2xl p-3.5 flex flex-col justify-between">
+            <div className="bg-[#00122e] border border-red-500/30 rounded-2xl p-3.5 flex flex-col justify-between shadow-lg">
               <div className="flex items-center justify-between text-red-500 mb-1">
                 <span className="text-[10px] font-black uppercase tracking-wider text-slate-300">Athlete Streak</span>
                 <Flame className="w-4 h-4 fill-red-500 text-red-500" />
@@ -329,7 +348,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               <span className="text-[10px] text-slate-400 font-medium mt-1">Daily Training Streak</span>
             </div>
 
-            <div className="bg-[#00122e] border border-yellow-400/40 rounded-2xl p-3.5 flex flex-col justify-between">
+            <div className="bg-[#00122e] border border-yellow-400/40 rounded-2xl p-3.5 flex flex-col justify-between shadow-lg">
               <div className="flex items-center justify-between text-yellow-400 mb-1">
                 <span className="text-[10px] font-black uppercase tracking-wider text-slate-300">Global Percentile</span>
                 <Trophy className="w-4 h-4 text-yellow-400" />
@@ -446,7 +465,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
                 <div className="space-y-1">
                   <div className="w-full h-3.5 bg-[#00122e] rounded-full overflow-hidden border border-[#12284c] p-0.5 relative">
-                    {/* Global Mean Vertical Line Marker */}
                     <div
                       className="absolute top-0 bottom-0 w-0.5 bg-slate-400 z-10"
                       style={{ left: `${globalMeanPercent}%` }}
@@ -459,7 +477,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   </div>
                   <div className="flex justify-between text-[10px] text-slate-400 font-mono pt-0.5">
                     <span>350ms (Slow)</span>
-                    <span className="text-slate-300 font-black">📍 Global Average ({GLOBAL_AVG_MEAN}ms)</span>
+                    <span className="text-slate-300 font-black">📍 Global Avg ({GLOBAL_AVG_MEAN}ms)</span>
                     <span className="text-yellow-400 font-black">100ms (Pro)</span>
                   </div>
                 </div>
@@ -478,7 +496,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
                 <div className="space-y-1">
                   <div className="w-full h-4 bg-[#00122e] rounded-full overflow-hidden border border-yellow-400/40 p-0.5 relative">
-                    {/* Median 50% Marker Line */}
                     <div className="absolute top-0 bottom-0 left-1/2 w-0.5 bg-slate-500 z-10" title="Global Median (50th Percentile)" />
                     <div
                       className="h-full bg-gradient-to-r from-red-600 via-yellow-500 to-yellow-400 rounded-full transition-all duration-700 shadow-md"
@@ -487,7 +504,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   </div>
                   <div className="flex justify-between text-[10px] text-slate-400 font-mono pt-0.5">
                     <span>Bottom 0%</span>
-                    <span className="text-slate-300 font-extrabold">50th Percentile (Median)</span>
+                    <span className="text-slate-300 font-extrabold">50th Percentile</span>
                     <span className="text-yellow-400 font-black">Top 1% Elite</span>
                   </div>
                 </div>
@@ -496,7 +513,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           </div>
 
           {/* Reaction Speed Spectrum Scale Card */}
-          <div className="bg-[#00122e] border border-[#12284c] rounded-2xl p-4 space-y-3">
+          <div className="bg-[#00122e] border border-[#12284c] rounded-2xl p-4 space-y-3 shadow-lg">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-black uppercase tracking-wider text-white flex items-center gap-1.5">
                 <BarChart3 className="w-4 h-4 text-yellow-400" /> Reaction Tier Benchmarks
@@ -534,7 +551,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           </div>
 
           {/* Test History Log */}
-          <div className="bg-[#00122e] border border-[#12284c] rounded-2xl p-4 space-y-3">
+          <div className="bg-[#00122e] border border-[#12284c] rounded-2xl p-4 space-y-3 shadow-lg">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-black uppercase tracking-wider text-white flex items-center gap-1.5">
                 <Clock className="w-4 h-4 text-yellow-400" /> Recent Reaction History
@@ -578,7 +595,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
           {/* Setup / Onboarding Flow Replay Banner */}
           {openOnboarding && (
-            <div className="bg-gradient-to-r from-[#00122e] to-[#020b1c] border border-[#12284c] rounded-2xl p-3.5 flex items-center justify-between gap-3">
+            <div className="bg-gradient-to-r from-[#00122e] to-[#020b1c] border border-[#12284c] rounded-2xl p-3.5 flex items-center justify-between gap-3 shadow-lg">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-xl bg-yellow-400/10 border border-yellow-400/30 text-yellow-400">
                   <Sparkles className="w-4 h-4" />
@@ -597,51 +614,134 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               </button>
             </div>
           )}
+
+          {/* App Store Compliance & Account Governance */}
+          <div className="bg-[#00122e] border border-[#12284c] rounded-2xl p-4 space-y-3 shadow-lg">
+            <div className="flex items-center justify-between border-b border-[#12284c] pb-2">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-yellow-400" />
+                <h4 className="text-xs font-black text-white uppercase tracking-wider">Account & Compliance</h4>
+              </div>
+              <span className="text-[9px] font-mono text-slate-400">Apple Guideline 5.1</span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <button
+                type="button"
+                onClick={() => {
+                  setLegalModalTab('PRIVACY');
+                  setIsLegalModalOpen(true);
+                }}
+                className="p-2.5 rounded-xl bg-[#020b1c] border border-[#12284c] hover:border-slate-600 text-slate-300 hover:text-white flex items-center gap-2 transition-all text-left"
+              >
+                <FileText className="w-4 h-4 text-yellow-400 shrink-0" />
+                <div>
+                  <div className="font-bold text-[11px]">Privacy Policy</div>
+                  <div className="text-[9px] text-slate-500">Data usage & rights</div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setLegalModalTab('EULA');
+                  setIsLegalModalOpen(true);
+                }}
+                className="p-2.5 rounded-xl bg-[#020b1c] border border-[#12284c] hover:border-slate-600 text-slate-300 hover:text-white flex items-center gap-2 transition-all text-left"
+              >
+                <Lock className="w-4 h-4 text-yellow-400 shrink-0" />
+                <div>
+                  <div className="font-bold text-[11px]">Standard EULA</div>
+                  <div className="text-[9px] text-slate-500">Terms & Subscriptions</div>
+                </div>
+              </button>
+            </div>
+
+            {/* Apple Mandatory Account Deletion */}
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={() => setIsDeleteModalOpen(true)}
+                className="w-full py-2 px-3 rounded-xl bg-red-950/40 hover:bg-red-900/40 border border-red-800/40 text-red-400 hover:text-red-300 text-xs font-bold flex items-center justify-center gap-2 transition-all"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete Athlete Account & Purge Data</span>
+              </button>
+            </div>
+          </div>
+
         </div>
       )}
 
-      {/* TAB 2: BADGES & ACHIEVEMENTS */}
+      {/* TAB 2: BADGES & ACHIEVEMENTS (Fixed Layout, Zero Truncation) */}
       {activeTab === 'BADGES' && (
-        <div className="space-y-3.5 animate-fade-in">
-          <div className="bg-[#00122e] border border-red-500/30 rounded-2xl p-4">
-            <div className="flex items-center justify-between mb-3">
+        <div className="space-y-4 animate-fade-in">
+          <div className="bg-[#00122e] border border-red-500/40 rounded-3xl p-4 sm:p-5 shadow-xl">
+            {/* Header with Progress Bar */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 pb-3 border-b border-[#12284c]">
               <div>
-                <h3 className="text-sm font-black text-white uppercase tracking-tight">Athlete Badge Showcase</h3>
-                <p className="text-xs text-slate-300 font-medium mt-0.5">Unlock achievements by pushing your reflexes to the limit</p>
+                <h3 className="text-base font-black text-white uppercase tracking-tight flex items-center gap-2">
+                  <Award className="w-5 h-5 text-yellow-400" />
+                  <span>Athlete Badge Showcase</span>
+                </h3>
+                <p className="text-xs text-slate-300 font-medium mt-0.5">
+                  Unlock prestigious achievements by pushing your reflexes to Formula 1 speeds
+                </p>
               </div>
-              <span className="text-xs font-black text-yellow-400 bg-red-600/30 px-3 py-1 rounded-full border border-yellow-400/40">
-                {BADGES.filter((b) => b.unlocked).length} / {BADGES.length} Unlocked
-              </span>
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                <span className="text-xs font-black text-yellow-400 bg-red-600/30 px-3 py-1.5 rounded-full border border-yellow-400/50 shadow-sm whitespace-nowrap">
+                  {BADGES.filter((b) => b.unlocked).length} of {BADGES.length} Unlocked
+                </span>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {/* Badge Grid - Single column on mobile / dual on desktop to guarantee clean, unclipped names */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {BADGES.map((badge) => (
                 <div
                   key={badge.id}
-                  className={`p-3.5 rounded-2xl border transition-all flex items-start gap-3 ${
+                  className={`p-3.5 sm:p-4 rounded-2xl border transition-all flex items-start gap-3.5 ${
                     badge.unlocked
-                      ? 'bg-[#020b1c] border-yellow-400/60 shadow-lg shadow-yellow-400/5'
-                      : 'bg-[#020b1c]/40 border-[#12284c] opacity-60'
+                      ? 'bg-gradient-to-br from-[#020b1c] to-[#041533] border-yellow-400/70 shadow-[0_0_15px_rgba(250,204,21,0.08)]'
+                      : 'bg-[#020b1c]/50 border-[#12284c] opacity-75'
                   }`}
                 >
+                  {/* Badge Icon Frame */}
                   <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shrink-0 border ${
-                    badge.unlocked ? 'bg-red-600/20 border-yellow-400/80 text-yellow-400' : 'bg-[#00122e] border-[#12284c] text-slate-500'
+                    badge.unlocked
+                      ? 'bg-gradient-to-br from-red-600/30 to-yellow-400/20 border-yellow-400 shadow-md text-yellow-400'
+                      : 'bg-[#00122e] border-[#12284c] text-slate-600'
                   }`}>
                     {badge.unlocked ? badge.icon : <Lock className="w-5 h-5 text-slate-500" />}
                   </div>
 
-                  <div className="flex-1 overflow-hidden">
-                    <div className="flex items-center justify-between">
-                      <h4 className="font-extrabold text-xs text-white truncate">{badge.name}</h4>
+                  {/* Badge Text Content */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <h4 className="font-black text-xs sm:text-sm text-white leading-tight">
+                        {badge.name}
+                      </h4>
                       {badge.unlocked ? (
-                        <span className="text-[9px] font-black uppercase text-yellow-400 bg-yellow-400/10 px-1.5 py-0.5 rounded border border-yellow-400/30">
-                          Unlocked
+                        <span className="text-[10px] font-black uppercase text-slate-950 bg-yellow-400 px-2 py-0.5 rounded-full border border-yellow-300 shadow-sm shrink-0">
+                          UNLOCKED
                         </span>
                       ) : (
-                        <span className="text-[9px] font-mono text-slate-400">{badge.req}</span>
+                        <span className="text-[9px] font-mono font-bold text-slate-400 bg-[#00122e] px-2 py-0.5 rounded border border-[#12284c] shrink-0">
+                          {badge.req}
+                        </span>
                       )}
                     </div>
-                    <p className="text-[11px] text-slate-300 font-medium mt-1 leading-snug">{badge.desc}</p>
+                    
+                    <p className="text-xs text-slate-300 font-medium mt-1 leading-relaxed">
+                      {badge.desc}
+                    </p>
+
+                    {badge.unlocked && (
+                      <div className="mt-2 flex items-center gap-1 text-[10px] font-black text-yellow-400">
+                        <CheckCircle2 className="w-3 h-3 fill-yellow-400/20" />
+                        <span>Verified on Athlete Pass</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -652,38 +752,40 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
       {/* TAB 3: AUDIO & HAPTIC SYNTHESIZER LAB */}
       {activeTab === 'AUDIO' && (
-        <div className="space-y-3.5 animate-fade-in">
-          <div className="bg-[#00122e] border border-red-500/30 rounded-2xl p-4 space-y-3">
-            <div className="flex items-center justify-between">
+        <div className="space-y-4 animate-fade-in">
+          <div className="bg-[#00122e] border border-red-500/30 rounded-3xl p-4 sm:p-5 space-y-4 shadow-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[#12284c]">
               <div>
-                <h3 className="text-sm font-black text-white uppercase tracking-tight flex items-center gap-1.5">
-                  <Volume2 className="w-4 h-4 text-yellow-400" /> Zero-Latency Haptic Sound Lab
+                <h3 className="text-base font-black text-white uppercase tracking-tight flex items-center gap-2">
+                  <Volume2 className="w-5 h-5 text-yellow-400" />
+                  <span>Zero-Latency Sound Lab</span>
                 </h3>
                 <p className="text-xs text-slate-300 font-medium mt-0.5">
-                  Web Audio API synthesized sound effects engineered for high-precision reaction feedback
+                  Web Audio API synthesized sound cues engineered for high-precision reaction feedback
                 </p>
               </div>
-              <span className="text-[10px] font-mono font-bold text-yellow-400 bg-yellow-400/10 border border-yellow-400/30 px-2.5 py-1 rounded-full">
-                AudioContext Active
+              <span className="text-[10px] font-mono font-bold text-yellow-400 bg-yellow-400/10 border border-yellow-400/30 px-2.5 py-1 rounded-full self-start sm:self-auto">
+                WebAudio Active
               </span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {SOUND_PRESETS.map((preset) => (
                 <button
+                  type="button"
                   key={preset.id}
                   onClick={() => playHapticSound(preset.id)}
-                  className="p-3 rounded-2xl border transition-all active:scale-95 flex items-center justify-between text-left bg-[#020b1c] border-[#12284c] text-white hover:border-yellow-400/60 shadow-md group"
+                  className="p-3.5 rounded-2xl border transition-all active:scale-95 flex items-center justify-between text-left bg-[#020b1c] border-[#12284c] text-white hover:border-yellow-400/60 shadow-md group"
                 >
                   <div className="flex items-center gap-3">
-                    <span className="text-2xl p-2 rounded-xl bg-[#00122e] border border-[#12284c]">{preset.icon}</span>
+                    <span className="text-2xl p-2.5 rounded-xl bg-[#00122e] border border-[#12284c]">{preset.icon}</span>
                     <div>
                       <div className="font-extrabold text-xs text-yellow-400 group-hover:text-white transition-colors">{preset.label}</div>
                       <div className="text-[10px] text-slate-400 font-mono mt-0.5">{preset.desc}</div>
                     </div>
                   </div>
-                  <span className="px-2 py-1 rounded-lg bg-red-600/30 border border-red-500/40 text-yellow-300 font-black text-[10px]">
-                    TEST 🔊
+                  <span className="px-2.5 py-1 rounded-lg bg-red-600/30 border border-red-500/40 text-yellow-300 font-black text-[10px]">
+                    PLAY 🔊
                   </span>
                 </button>
               ))}
@@ -699,6 +801,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             <div className="flex items-center justify-between pb-2 border-b border-[#12284c]">
               <h3 className="font-black text-sm text-white uppercase tracking-tight">Edit Athlete Pass Details</h3>
               <button
+                type="button"
                 onClick={() => setEditing(false)}
                 className="p-1 rounded-xl text-slate-400 hover:text-white hover:bg-[#12284c]"
               >
@@ -723,6 +826,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 <div className="flex flex-wrap gap-1.5 justify-center max-h-32 overflow-y-auto p-1 bg-[#020b1c] rounded-xl border border-[#12284c]">
                   {AVATARS.map((av) => (
                     <button
+                      type="button"
                       key={av}
                       onClick={() => setSelectedAvatar(av)}
                       className={`text-xl p-2 rounded-xl border transition-all ${
@@ -752,14 +856,33 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </div>
 
             <button
+              type="button"
               onClick={handleSave}
-              className="w-full py-2.5 bg-yellow-400 hover:bg-yellow-300 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg border border-yellow-300"
+              className="w-full py-2.5 bg-yellow-400 hover:bg-yellow-300 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg border border-yellow-300 transition-all active:scale-95"
             >
               SAVE ATHLETE PASS CHANGES
             </button>
           </div>
         </div>
       )}
+
+      {/* Account Deletion Dialog (Apple Guideline 5.1.1(v)) */}
+      <AccountDeletionModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => setIsDeleteModalOpen(false)}
+        onConfirmDelete={() => {
+          setIsDeleteModalOpen(false);
+          if (onDeleteAccount) onDeleteAccount();
+        }}
+        username={profile.username}
+      />
+
+      {/* Legal & App Store Compliance Modal */}
+      <LegalModal
+        isOpen={isLegalModalOpen}
+        onClose={() => setIsLegalModalOpen(false)}
+        initialTab={legalModalTab}
+      />
     </div>
   );
 };

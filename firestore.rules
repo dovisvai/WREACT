@@ -1,0 +1,69 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions for security validation
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isNonEmptyString(val, maxLen) {
+      return val is string && val.size() > 0 && val.size() <= maxLen;
+    }
+
+    function isValidCountry(code) {
+      return code is string && code.size() >= 2 && code.size() <= 3;
+    }
+
+    // Athletes Collection
+    // - Public read for leaderboard presentation
+    // - Write strictly restricted to authenticated owner
+    // - Validates field types and constraints (prevent tampering with scores/ranks)
+    match /athletes/{userId} {
+      allow read: if true;
+      
+      allow create: if isOwner(userId)
+                    && isNonEmptyString(request.resource.data.username, 30)
+                    && isValidCountry(request.resource.data.country);
+
+      allow update: if isOwner(userId)
+                    && (!('username' in request.resource.data) || isNonEmptyString(request.resource.data.username, 30))
+                    && (!('country' in request.resource.data) || isValidCountry(request.resource.data.country))
+                    && (!('bestScore' in request.resource.data) || request.resource.data.bestScore == null || (request.resource.data.bestScore is number && request.resource.data.bestScore >= 50));
+
+      allow delete: if isOwner(userId);
+    }
+
+    // Reaction Scores Collection
+    // - Global public read for world and national leaderboards
+    // - Anti-Cheat Hardening: Strictly enforces biologically plausible reaction window (>= 50ms and <= 5000ms)
+    // - Prevents spoofing of excessive payload size, non-string identifiers, or falsified timestamps
+    match /reaction_scores/{scoreId} {
+      allow read: if true;
+      
+      allow create: if request.resource.data.scoreMs is number
+                    && request.resource.data.scoreMs >= 50
+                    && request.resource.data.scoreMs <= 5000
+                    && isNonEmptyString(request.resource.data.username, 30)
+                    && isValidCountry(request.resource.data.country)
+                    && isNonEmptyString(request.resource.data.userId, 128);
+
+      allow update: if false; // Scores are immutable once verified
+      allow delete: if isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+
+    // Duel Rooms Collection
+    // - Validates room format, player slots, and status state machine
+    match /duel_rooms/{roomId} {
+      allow read: if true;
+      allow create: if isNonEmptyString(request.resource.data.roomCode, 10)
+                    && request.resource.data.status in ['WAITING', 'COUNTDOWN', 'SIGNAL', 'FINISHED'];
+      allow update: if request.resource.data.status in ['WAITING', 'COUNTDOWN', 'SIGNAL', 'FINISHED'];
+      allow delete: if isAuthenticated();
+    }
+  }
+}

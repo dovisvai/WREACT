@@ -1,4 +1,5 @@
 import { useCallback, useRef } from 'react';
+import { isGlobalAudioMuted } from '../utils/audio';
 
 /**
  * Web Audio API synthesizer presets for tactile, satisfying haptic-like sounds.
@@ -44,7 +45,8 @@ export function useHapticSound(options: HapticSoundOptions = {}) {
 
   const playHapticSound = useCallback(
     (preset: HapticSoundPreset = 'tap', overrideVolume?: number) => {
-      if (!enabledRef.current) return;
+      // Check both hook option and global muted state
+      if (!enabledRef.current || isGlobalAudioMuted()) return;
 
       try {
         const ctx = getAudioContext();
@@ -53,6 +55,7 @@ export function useHapticSound(options: HapticSoundOptions = {}) {
         const effectiveVol = overrideVolume ?? volume;
         masterGain.gain.setValueAtTime(effectiveVol, now);
         masterGain.connect(ctx.destination);
+
 
         // VIBRATION FEEDBACK
         if (enableVibration && 'vibrate' in navigator) {

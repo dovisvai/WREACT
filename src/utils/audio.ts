@@ -3,6 +3,15 @@
  */
 
 let audioCtx: AudioContext | null = null;
+let globalAudioMuted = false;
+
+export function setGlobalAudioMuted(muted: boolean) {
+  globalAudioMuted = muted;
+}
+
+export function isGlobalAudioMuted(): boolean {
+  return globalAudioMuted;
+}
 
 function getAudioContext(): AudioContext {
   if (!audioCtx) {
@@ -16,6 +25,7 @@ function getAudioContext(): AudioContext {
 }
 
 export function playBeep(frequency = 880, duration = 0.08, type: OscillatorType = 'sine', volume = 0.2) {
+  if (globalAudioMuted) return;
   try {
     const ctx = getAudioContext();
     const osc = ctx.createOscillator();
@@ -38,15 +48,18 @@ export function playBeep(frequency = 880, duration = 0.08, type: OscillatorType 
 }
 
 export function playSignalSound() {
+  if (globalAudioMuted) return;
   // Crisp double high-ping for reaction signal
   playBeep(1046.5, 0.1, 'sine', 0.3); // High C6
 }
 
 export function playClickSound() {
+  if (globalAudioMuted) return;
   playBeep(600, 0.03, 'triangle', 0.15);
 }
 
 export function playErrorSound() {
+  if (globalAudioMuted) return;
   try {
     const ctx = getAudioContext();
     const osc = ctx.createOscillator();
@@ -70,12 +83,15 @@ export function playErrorSound() {
 }
 
 export function playFanfareSound() {
+  if (globalAudioMuted) return;
   try {
     const ctx = getAudioContext();
     const notes = [523.25, 659.25, 783.99, 1046.5]; // C E G C
     notes.forEach((note, i) => {
       setTimeout(() => {
-        playBeep(note, 0.15, 'triangle', 0.25);
+        if (!globalAudioMuted) {
+          playBeep(note, 0.15, 'triangle', 0.25);
+        }
       }, i * 90);
     });
   } catch (err) {
@@ -84,6 +100,7 @@ export function playFanfareSound() {
 }
 
 export function triggerHaptic(pattern: number | number[] = 50) {
+  if (globalAudioMuted) return;
   if ('vibrate' in navigator) {
     try {
       navigator.vibrate(pattern);
@@ -92,3 +109,4 @@ export function triggerHaptic(pattern: number | number[] = 50) {
     }
   }
 }
+

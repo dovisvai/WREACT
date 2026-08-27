@@ -247,71 +247,83 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
   return (
     <div className="flex flex-col h-full bg-[#020b1c] text-white select-none">
       {/* Game Mode Selector Bar */}
-      <div className="flex items-center gap-1.5 px-3 py-2 bg-[#00122e] border-b border-[#12284c] overflow-x-auto no-scrollbar text-xs">
+      <div className="flex items-center gap-2 px-3 py-2.5 bg-[#001026] border-b border-[#12284c] overflow-x-auto no-scrollbar text-xs">
         <button
+          type="button"
           onClick={() => { playSnap(); setMode('CLASSIC'); }}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold transition-all shrink-0 active:scale-95 ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black transition-all shrink-0 active:scale-95 whitespace-nowrap ${
             mode === 'CLASSIC'
-              ? 'bg-yellow-400 text-slate-950 font-black shadow-md shadow-yellow-400/20 border border-yellow-300'
-              : 'bg-[#020b1c] border border-[#12284c] text-slate-300 hover:text-white'
+              ? 'bg-gradient-to-r from-red-600 to-red-500 text-white shadow-md shadow-red-600/30 border border-yellow-400/60'
+              : 'bg-[#020b1c] border border-[#12284c] text-slate-300 hover:text-white hover:border-slate-700'
           }`}
         >
-          <Zap className="w-3.5 h-3.5 fill-current" /> Classic
+          <Zap className="w-3.5 h-3.5 text-yellow-400 fill-current" />
+          <span>Classic</span>
         </button>
 
         <button
+          type="button"
           onClick={() => { playSnap(); setMode('FALSE_ALARM'); }}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold transition-all shrink-0 active:scale-95 ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black transition-all shrink-0 active:scale-95 whitespace-nowrap ${
             mode === 'FALSE_ALARM'
-              ? 'bg-red-600 text-white font-black shadow-md shadow-red-600/20 border border-yellow-400/40'
-              : 'bg-[#020b1c] border border-[#12284c] text-slate-300 hover:text-white'
+              ? 'bg-gradient-to-r from-red-600 to-red-500 text-white shadow-md shadow-red-600/30 border border-yellow-400/60'
+              : 'bg-[#020b1c] border border-[#12284c] text-slate-300 hover:text-white hover:border-slate-700'
           }`}
         >
-          <AlertTriangle className="w-3.5 h-3.5" /> Trap Signal
+          <AlertTriangle className="w-3.5 h-3.5 text-yellow-400" />
+          <span>Trap Signal</span>
         </button>
 
         <button
+          type="button"
           onClick={() => { playSnap(); setMode('PATTERN_SEQUENCE'); }}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold transition-all shrink-0 active:scale-95 ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black transition-all shrink-0 active:scale-95 whitespace-nowrap ${
             mode === 'PATTERN_SEQUENCE'
-              ? 'bg-yellow-400 text-slate-950 font-black shadow-md shadow-yellow-400/20 border border-yellow-300'
-              : 'bg-[#020b1c] border border-[#12284c] text-slate-300 hover:text-white'
+              ? 'bg-gradient-to-r from-red-600 to-red-500 text-white shadow-md shadow-red-600/30 border border-yellow-400/60'
+              : 'bg-[#020b1c] border border-[#12284c] text-slate-300 hover:text-white hover:border-slate-700'
           }`}
         >
-          <RefreshCw className="w-3.5 h-3.5" /> Speed Pattern
+          <RefreshCw className="w-3.5 h-3.5 text-yellow-400" />
+          <span>Speed Pattern</span>
         </button>
 
         <button
+          type="button"
           onClick={() => { playSnap(); setMode('PRECISION_TARGET'); }}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold transition-all shrink-0 active:scale-95 ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black transition-all shrink-0 active:scale-95 whitespace-nowrap ${
             mode === 'PRECISION_TARGET'
-              ? 'bg-red-600 text-white font-black shadow-md shadow-red-600/20 border border-yellow-400/40'
-              : 'bg-[#020b1c] border border-[#12284c] text-slate-300 hover:text-white'
+              ? 'bg-gradient-to-r from-red-600 to-red-500 text-white shadow-md shadow-red-600/30 border border-yellow-400/60'
+              : 'bg-[#020b1c] border border-[#12284c] text-slate-300 hover:text-white hover:border-slate-700'
           }`}
         >
-          <Target className="w-3.5 h-3.5" /> Target Aim
+          <Target className="w-3.5 h-3.5 text-yellow-400" />
+          <span>Target Aim</span>
         </button>
 
         <button
+          type="button"
           onClick={() => { playSnap(); setMode('REVERSE_COLOR'); }}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold transition-all shrink-0 active:scale-95 ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black transition-all shrink-0 active:scale-95 whitespace-nowrap ${
             mode === 'REVERSE_COLOR'
-              ? 'bg-yellow-400 text-slate-950 font-black shadow-md shadow-yellow-400/20 border border-yellow-300'
-              : 'bg-[#020b1c] border border-[#12284c] text-slate-300 hover:text-white'
+              ? 'bg-gradient-to-r from-red-600 to-red-500 text-white shadow-md shadow-red-600/30 border border-yellow-400/60'
+              : 'bg-[#020b1c] border border-[#12284c] text-slate-300 hover:text-white hover:border-slate-700'
           }`}
         >
-          <Eye className="w-3.5 h-3.5" /> Stroop Reverse
+          <Eye className="w-3.5 h-3.5 text-yellow-400" />
+          <span>Stroop Reverse</span>
         </button>
 
         <button
+          type="button"
           onClick={() => { playSnap(); setMode('DAILY_CHALLENGE'); }}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold transition-all shrink-0 active:scale-95 ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black transition-all shrink-0 active:scale-95 whitespace-nowrap ${
             mode === 'DAILY_CHALLENGE'
-              ? 'bg-red-600 text-white font-black shadow-md shadow-red-600/20 border border-yellow-400/40'
-              : 'bg-[#020b1c] border border-[#12284c] text-slate-300 hover:text-white'
+              ? 'bg-gradient-to-r from-red-600 to-red-500 text-white shadow-md shadow-red-600/30 border border-yellow-400/60'
+              : 'bg-[#020b1c] border border-[#12284c] text-slate-300 hover:text-white hover:border-slate-700'
           }`}
         >
-          <Trophy className="w-3.5 h-3.5" /> Daily Event
+          <Trophy className="w-3.5 h-3.5 text-yellow-400" />
+          <span>Daily Event</span>
         </button>
       </div>
 
@@ -356,7 +368,7 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
               onClick={startTest}
               className="w-full py-4 rounded-2xl bg-gradient-to-r from-red-600 via-red-500 to-yellow-400 hover:from-red-500 hover:to-yellow-300 text-slate-950 font-black text-lg uppercase tracking-wider shadow-xl shadow-red-600/30 active:scale-95 transition-all transform border border-yellow-300"
             >
-              LAUNCH RELEX TEST ⚡
+              LAUNCH REACTION TEST ⚡
             </button>
           </div>
         )}

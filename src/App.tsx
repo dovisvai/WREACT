@@ -15,13 +15,31 @@ import { AuthModal } from './components/AuthModal';
 import { MonetizationModal } from './components/MonetizationModal';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { getCountryFlag } from './utils/countries';
+import { setGlobalAudioMuted } from './utils/audio';
+import { 
+  syncUserProfileToFirebase, 
+  submitReactionScoreToFirebase, 
+  listenToGlobalLeaderboard 
+} from './services/firebase';
 
 export default function App() {
   // Navigation & Platform Frame
   const [activeTab, setActiveTab] = useState<TabType>('PLAY');
   const [activeGameMode, setActiveGameMode] = useState<GameMode>('CLASSIC');
   const [deviceOS, setDeviceOS] = useState<DeviceOS>('iOS');
-  const [audioEnabled, setAudioEnabled] = useState<boolean>(true);
+  const [audioEnabled, setAudioEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem('wreact_audio_enabled');
+    const isEnabled = saved !== null ? saved === 'true' : true;
+    setGlobalAudioMuted(!isEnabled);
+    return isEnabled;
+  });
+
+  const handleSetAudioEnabled = (val: boolean) => {
+    setAudioEnabled(val);
+    setGlobalAudioMuted(!val);
+    localStorage.setItem('wreact_audio_enabled', String(val));
+  };
+
 
   // First-time Onboarding State
   const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(() => {
@@ -129,8 +147,20 @@ export default function App() {
       }
     };
 
+    // Firestore Real-time Leaderboard Listener
+    const unsubscribeFirestore = listenToGlobalLeaderboard((liveScores) => {
+      if (liveScores && liveScores.length > 0) {
+        setScores((prev) => {
+          const combined = [...liveScores, ...prev];
+          const unique = Array.from(new Map(combined.map(s => [s.id || `${s.username}_${s.scoreMs}`, s])).values());
+          return unique.sort((a, b) => a.scoreMs - b.scoreMs);
+        });
+      }
+    });
+
     return () => {
       ws.close();
+      if (unsubscribeFirestore) unsubscribeFirestore();
     };
   }, []);
 
@@ -138,6 +168,7 @@ export default function App() {
     setUserProfile((prev) => {
       const next = { ...prev, ...updated };
       localStorage.setItem('world_reaction_user', JSON.stringify(next));
+      syncUserProfileToFirebase(next);
       return next;
     });
   };
@@ -166,6 +197,29 @@ export default function App() {
       verifiedAthlete: false,
       email: undefined,
     });
+  };
+
+  const handleDeleteAccount = () => {
+    localStorage.clear();
+    const freshUser: UserProfile = {
+      id: `wreact_${Math.random().toString(36).substring(2, 9)}`,
+      username: 'ReflexAthlete',
+      country: 'US',
+      avatar: '⚡',
+      streakDays: 0,
+      lastDailyDate: '',
+      testsCompleted: 0,
+      bestScore: 0,
+      unlockedBadges: [],
+      history: [],
+      isLoggedIn: false,
+      authProvider: 'guest',
+      verifiedAthlete: false,
+      proPassActive: false,
+    };
+    setUserProfile(freshUser);
+    localStorage.setItem('world_reaction_user', JSON.stringify(freshUser));
+    setIsOnboardingOpen(true);
   };
 
   const handleOnboardingComplete = (updatedProfile: Partial<UserProfile>) => {
@@ -211,6 +265,17 @@ export default function App() {
         }),
       }).catch(() => {});
     }
+
+    // Submit to Firestore Global Leaderboard
+    submitReactionScoreToFirebase({
+      userId: userProfile.id,
+      username: userProfile.username,
+      country: userProfile.country,
+      avatar: userProfile.avatar,
+      scoreMs,
+      mode,
+      tier: scoreMs < 150 ? 'F1 GOD' : scoreMs < 200 ? 'ESPORTS PRO' : scoreMs < 250 ? 'TOP ATHLETE' : 'AVERAGE HUMAN',
+    });
   };
 
   const openShareModal = (scoreMs: number, mode: GameMode) => {
@@ -232,7 +297,7 @@ export default function App() {
           deviceOS={deviceOS}
           setDeviceOS={setDeviceOS}
           audioEnabled={audioEnabled}
-          setAudioEnabled={setAudioEnabled}
+          setAudioEnabled={handleSetAudioEnabled}
           onlineCount={onlineCount}
           openProfile={() => setActiveTab('PROFILE')}
           openNotifications={() => setIsNotificationModalOpen(true)}
@@ -305,6 +370,7 @@ export default function App() {
               openAuthModal={() => setIsAuthModalOpen(true)}
               openMonetizationModal={() => setIsMonetizationModalOpen(true)}
               openOnboarding={() => setIsOnboardingOpen(true)}
+              onDeleteAccount={handleDeleteAccount}
             />
           )}
         </div>

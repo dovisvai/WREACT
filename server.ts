@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import http from 'http';
 import path from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -6,7 +6,35 @@ import { createServer as createViteServer } from 'vite';
 import { ScoreRecord, DailyChallengeInfo, GameMode, LiveTickerEvent } from './src/types.js';
 
 const app = express();
-app.use(express.json());
+
+// Security Hardening Middlewares
+app.disable('x-powered-by');
+
+// Security Response Headers (CSP, X-Frame-Options, HSTS, No-Sniff)
+app.use((req: Request, res: Response, next: NextFunction) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
+// JSON Body Parser with strict payload limit
+app.use(express.json({ limit: '64kb' }));
+
+// Simple in-memory rate limiting map for score submissions
+const submissionRateLimitMap = new Map<string, { count: number; resetTime: number }>();
+function checkRateLimit(ip: string, limit: number = 30, windowMs: number = 60000): boolean {
+  const now = Date.now();
+  const entry = submissionRateLimitMap.get(ip) || { count: 0, resetTime: now + windowMs };
+  if (now > entry.resetTime) {
+    entry.count = 1;
+    entry.resetTime = now + windowMs;
+  } else {
+    entry.count += 1;
+  }
+  submissionRateLimitMap.set(ip, entry);
+  return entry.count <= limit;
+}
 
 const server = http.createServer(app);
 const PORT = 3000;
@@ -21,19 +49,11 @@ let scores: ScoreRecord[] = [
   { id: '3', username: 'Sven_DE', country: 'DE', scoreMs: 145, mode: 'CLASSIC', timestamp: Date.now() - 3600000 * 1, device: 'iOS', badge: '🦅 Eagle Eye' },
   { id: '4', username: 'Nova_US', country: 'US', scoreMs: 149, mode: 'CLASSIC', timestamp: Date.now() - 3600000 * 5, device: 'iOS' },
   { id: '5', username: 'Carlos_BR', country: 'BR', scoreMs: 152, mode: 'CLASSIC', timestamp: Date.now() - 3600000 * 8, device: 'Android' },
-
-  // False Alarm
   { id: '6', username: 'FocusMaster', country: 'SE', scoreMs: 162, mode: 'FALSE_ALARM', timestamp: Date.now() - 3600000 * 3, device: 'iOS' },
   { id: '7', username: 'Yuki_JP', country: 'JP', scoreMs: 168, mode: 'FALSE_ALARM', timestamp: Date.now() - 3600000 * 6, device: 'Android' },
-
-  // Pattern Sequence
   { id: '8', username: 'FingerNinja', country: 'KR', scoreMs: 310, mode: 'PATTERN_SEQUENCE', timestamp: Date.now() - 3600000 * 2, device: 'iOS' },
   { id: '9', username: 'SpeedDemon', country: 'US', scoreMs: 335, mode: 'PATTERN_SEQUENCE', timestamp: Date.now() - 3600000 * 7, device: 'Android' },
-
-  // Precision Target
   { id: '10', username: 'SniperEye', country: 'DE', scoreMs: 174, mode: 'PRECISION_TARGET', timestamp: Date.now() - 3600000 * 1, device: 'iOS' },
-
-  // Daily Challenge
   { id: '11', username: 'ApexPredator', country: 'CA', scoreMs: 154, mode: 'DAILY_CHALLENGE', timestamp: Date.now() - 3600000 * 3, device: 'iOS', isDaily: true },
   { id: '12', username: 'Aarav_IN', country: 'IN', scoreMs: 159, mode: 'DAILY_CHALLENGE', timestamp: Date.now() - 3600000 * 5, device: 'Android', isDaily: true }
 ];
@@ -93,17 +113,16 @@ function broadcast(data: object) {
   });
 }
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
   // Send initial state to client
   ws.send(JSON.stringify({
     type: 'INIT_STATE',
-    onlinePlayers: wss.clients.size + 120, // simulate realistic active global players scale
+    onlinePlayers: wss.clients.size + 120,
     scores,
     dailyChallenge: currentDailyChallenge,
     ticker: liveTicker
   }));
 
-  // Broadcast online player count update
   broadcast({ type: 'ONLINE_COUNT', count: wss.clients.size + 120 });
 
   ws.on('message', (message) => {
@@ -111,12 +130,17 @@ wss.on('connection', (ws) => {
       const data = JSON.parse(message.toString());
 
       if (data.type === 'SUBMIT_SCORE') {
-        const { username, country, scoreMs, mode, device, isDaily } = data.payload;
-        if (typeof scoreMs === 'number' && scoreMs >= 80 && scoreMs <= 2000) {
+        const { username, country, scoreMs, mode, device, isDaily } = data.payload || {};
+        
+        // Anti-cheat validation: human reaction range 80ms - 5000ms
+        if (typeof scoreMs === 'number' && scoreMs >= 80 && scoreMs <= 5000) {
+          const sanitizedUsername = String(username || 'Anonymous').slice(0, 30).trim();
+          const sanitizedCountry = String(country || 'US').slice(0, 3).toUpperCase();
+
           const newScore: ScoreRecord = {
             id: `sc-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-            username: username || 'Anonymous',
-            country: country || 'US',
+            username: sanitizedUsername,
+            country: sanitizedCountry,
             scoreMs,
             mode: mode || 'CLASSIC',
             timestamp: Date.now(),
@@ -125,9 +149,8 @@ wss.on('connection', (ws) => {
           };
 
           scores.unshift(newScore);
-          if (scores.length > 500) scores.pop(); // keep top 500
+          if (scores.length > 500) scores.pop();
 
-          // Update ticker
           const tickerItem: LiveTickerEvent = {
             id: newScore.id,
             username: newScore.username,
@@ -157,15 +180,15 @@ wss.on('connection', (ws) => {
 
       // DUEL HANDLERS
       if (data.type === 'JOIN_DUEL') {
-        const { username, country, avatar } = data.payload;
+        const { username, country, avatar } = data.payload || {};
         let room = Array.from(duelRooms.values()).find((r) => r.status === 'waiting' && r.players.length === 1);
 
         const player: DuelPlayer = {
           ws,
           id: `p-${Math.random().toString(36).substr(2, 6)}`,
-          username: username || 'Rival',
-          country: country || 'US',
-          avatar: avatar || '⚡'
+          username: String(username || 'Rival').slice(0, 30),
+          country: String(country || 'US').slice(0, 3),
+          avatar: String(avatar || '⚡').slice(0, 8)
         };
 
         if (!room) {
@@ -180,7 +203,6 @@ wss.on('connection', (ws) => {
           room.players.push(player);
         }
 
-        // Notify players in room
         const roomState = {
           roomId: room.id,
           status: room.status,
@@ -200,7 +222,6 @@ wss.on('connection', (ws) => {
           }
         });
 
-        // Auto start duel when 2 players connect!
         if (room.players.length === 2 && room.status === 'waiting') {
           room.status = 'countdown';
           const countdownTime = 3;
@@ -211,7 +232,6 @@ wss.on('connection', (ws) => {
             }
           });
 
-          // Random signal delay between 2000ms and 4500ms
           const signalDelay = 3000 + Math.random() * 2500;
           room.signalTimeout = setTimeout(() => {
             if (room && room.status === 'countdown') {
@@ -228,13 +248,12 @@ wss.on('connection', (ws) => {
       }
 
       if (data.type === 'DUEL_TAP') {
-        const { roomId, playerId } = data.payload;
+        const { roomId, playerId } = data.payload || {};
         const room = duelRooms.get(roomId);
         if (room) {
           const player = room.players.find((p) => p.id === playerId);
           if (player) {
             if (room.status === 'countdown') {
-              // False start!
               player.falseStart = true;
               player.scoreMs = null;
             } else if (room.status === 'signal' && room.signalTime) {
@@ -242,7 +261,6 @@ wss.on('connection', (ws) => {
               player.scoreMs = reactionTime;
             }
 
-            // Check if both players tapped or failed
             const allFinished = room.players.every((p) => p.scoreMs !== undefined || p.falseStart);
             if (allFinished) {
               room.status = 'finished';
@@ -264,7 +282,6 @@ wss.on('connection', (ws) => {
               });
               duelRooms.delete(room.id);
             } else {
-              // Broadcast partial update
               room.players.forEach((p) => {
                 if (p.ws.readyState === WebSocket.OPEN) {
                   p.ws.send(JSON.stringify({
@@ -310,24 +327,28 @@ app.get('/api/leaderboard', (req, res) => {
     filtered = filtered.filter((s) => s.timestamp >= oneDayAgo);
   }
 
-  // Sort by lowest scoreMs (fastest reaction first!)
   filtered.sort((a, b) => a.scoreMs - b.scoreMs);
-
   res.json({ scores: filtered.slice(0, 100) });
 });
 
 app.post('/api/score', (req, res) => {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  if (!checkRateLimit(ip)) {
+    res.status(429).json({ error: 'Too many submissions. Please slow down.' });
+    return;
+  }
+
   const { username, country, scoreMs, mode, device, isDaily } = req.body;
 
-  if (!scoreMs || scoreMs < 80) {
-    res.status(400).json({ error: 'Invalid score or false reaction' });
+  if (typeof scoreMs !== 'number' || scoreMs < 80 || scoreMs > 5000) {
+    res.status(400).json({ error: 'Invalid score or impossible biological reaction time' });
     return;
   }
 
   const newScore: ScoreRecord = {
     id: `sc-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-    username: username || 'Anonymous',
-    country: country || 'US',
+    username: String(username || 'Anonymous').slice(0, 30).trim(),
+    country: String(country || 'US').slice(0, 3).toUpperCase(),
     scoreMs,
     mode: mode || 'CLASSIC',
     timestamp: Date.now(),
@@ -338,7 +359,6 @@ app.post('/api/score', (req, res) => {
   scores.unshift(newScore);
   scores.sort((a, b) => a.scoreMs - b.scoreMs);
 
-  // Broadcast
   broadcast({
     type: 'NEW_SCORE_ADDED',
     score: newScore,

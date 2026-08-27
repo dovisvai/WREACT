@@ -1,0 +1,56 @@
+{
+  "entities": {
+    "athletes": {
+      "title": "Athlete Profiles",
+      "description": "Registered athlete accounts with statistics, badges, and national affiliations",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "country": { "type": "string" },
+        "avatar": { "type": "string" },
+        "streakDays": { "type": "number" },
+        "bestScore": { "type": "number" },
+        "averageScore": { "type": "number" },
+        "testsCompleted": { "type": "number" },
+        "unlockedBadges": { "type": "array" },
+        "verifiedAthlete": { "type": "boolean" },
+        "proPassActive": { "type": "boolean" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["userId", "username", "country"]
+    },
+    "reaction_scores": {
+      "title": "Reaction Score Submissions",
+      "description": "Global leaderboard submissions with millisecond precision and anti-cheat validation",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "country": { "type": "string" },
+        "avatar": { "type": "string" },
+        "scoreMs": { "type": "number" },
+        "mode": { "type": "string" },
+        "tier": { "type": "string" },
+        "verified": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["userId", "username", "country", "scoreMs", "mode", "createdAt"]
+    },
+    "duel_rooms": {
+      "title": "Live 1v1 Duel Match Rooms",
+      "description": "Real-time multiplayer reflex rooms with synchronized countdowns and outcomes",
+      "type": "object",
+      "properties": {
+        "roomCode": { "type": "string" },
+        "host": { "type": "object" },
+        "guest": { "type": "object" },
+        "status": { "type": "string" },
+        "triggerTimestamp": { "type": "number" },
+        "winnerId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["roomCode", "status", "createdAt"]
+    }
+  }
+}

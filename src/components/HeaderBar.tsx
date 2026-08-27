@@ -116,16 +116,29 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
         <div className="flex items-center gap-2">
           {/* Audio toggle */}
           <button
+            type="button"
+            id="sound-toggle-btn"
             onClick={() => {
-              if (!audioEnabled) {
+              const nextState = !audioEnabled;
+              if (nextState) {
+                // If unmuting, play a tactile pop confirmation
                 playPop();
               }
-              setAudioEnabled(!audioEnabled);
+              setAudioEnabled(nextState);
             }}
-            className="p-2 rounded-xl bg-[#020b1c] border border-[#12284c] text-slate-300 hover:text-white hover:border-red-500/50 transition-all active:scale-95"
-            title={audioEnabled ? 'Mute Audio' : 'Unmute Audio'}
+            className={`p-2 rounded-xl border transition-all active:scale-90 flex items-center justify-center ${
+              audioEnabled
+                ? 'bg-[#020b1c] border-yellow-400/50 text-yellow-400 hover:border-yellow-400 shadow-[0_0_10px_rgba(250,204,21,0.15)]'
+                : 'bg-[#020b1c] border-red-500/40 text-red-400 hover:border-red-500 shadow-sm'
+            }`}
+            title={audioEnabled ? 'Sound is ON (Click to Mute)' : 'Sound is MUTED (Click to Unmute)'}
+            aria-label={audioEnabled ? 'Mute Audio' : 'Unmute Audio'}
           >
-            {audioEnabled ? <Volume2 className="w-4 h-4 text-yellow-400" /> : <VolumeX className="w-4 h-4 text-slate-500" />}
+            {audioEnabled ? (
+              <Volume2 className="w-4 h-4 text-yellow-400 animate-pulse" />
+            ) : (
+              <VolumeX className="w-4 h-4 text-red-400" />
+            )}
           </button>
 
           {/* Daily Notifications Button */}
