@@ -1,0 +1,6 @@
+{
+  "name": "WREACT",
+  "description": "Global reaction speed competition testing instant reflexes with real-time world leaderboards, daily challenges, and game modes.",
+  "requestFramePermissions": ["microphone", "geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
