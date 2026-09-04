@@ -465,6 +465,42 @@ export const RankBadge: React.FC<{ rank: number | null; className?: string }> = 
   );
 };
 
+/**
+ * Placeholder rows shown while data is in flight.
+ *
+ * The distinction matters: an empty state asserts something about the world
+ * ("no nation has qualified"), and making that claim before the data has
+ * arrived tells a user on a slow connection something untrue. A skeleton says
+ * only "not yet", which is the honest position while loading.
+ */
+export const Skeleton: React.FC<{ rows?: number; className?: string }> = ({
+  rows = 6,
+  className,
+}) => (
+  <div className={cx('space-y-1.5', className)} aria-busy="true" aria-live="polite">
+    <span className="sr-only">Loading</span>
+    {Array.from({ length: rows }).map((_, index) => (
+      <div
+        key={index}
+        className="animate-skeleton rounded-md border border-pitch-700 bg-pitch-850 px-3 py-2.5"
+        // Rows fade in sequence so the block reads as loading rather than broken.
+        style={{ animationDelay: `${index * 90}ms` }}
+      >
+        <div className="flex items-center gap-3">
+          <div className="h-4 w-6 rounded-xs bg-pitch-700" />
+          <div className="h-5 w-8 rounded-xs bg-pitch-700" />
+          <div className="flex-1 space-y-1.5">
+            <div className="h-3.5 w-2/5 rounded-xs bg-pitch-700" />
+            <div className="h-2.5 w-3/5 rounded-xs bg-pitch-700/60" />
+          </div>
+          <div className="h-5 w-12 rounded-xs bg-pitch-700" />
+        </div>
+        <div className="mt-2 h-1.5 rounded-xs bg-pitch-700/60" />
+      </div>
+    ))}
+  </div>
+);
+
 /** Consistent empty state. Never a dead screen. */
 export const EmptyState: React.FC<{
   title: string;

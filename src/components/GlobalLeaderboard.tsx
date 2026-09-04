@@ -6,6 +6,7 @@ import { isPlausibleReaction } from '../utils/standings';
 import {
   EmptyState,
   Flag,
+  Skeleton,
   Label,
   RankBadge,
   Screen,
@@ -19,6 +20,7 @@ interface GlobalLeaderboardProps {
   setCurrentMode: (mode: GameMode | 'ALL') => void;
   userCountry: string;
   username: string;
+  isLoading: boolean;
 }
 
 const MODE_OPTIONS: { value: GameMode | 'ALL'; label: string }[] = [
@@ -44,6 +46,7 @@ export const GlobalLeaderboard: React.FC<GlobalLeaderboardProps> = ({
   setCurrentMode,
   userCountry,
   username,
+  isLoading,
 }) => {
   const [timeframe, setTimeframe] = useState<'ALL' | 'TODAY'>('ALL');
   const [search, setSearch] = useState('');
@@ -105,7 +108,9 @@ export const GlobalLeaderboard: React.FC<GlobalLeaderboardProps> = ({
       </div>
 
       <div className="px-4 py-4">
-        {ranked.length === 0 ? (
+        {isLoading && ranked.length === 0 ? (
+          <Skeleton rows={8} />
+        ) : ranked.length === 0 ? (
           <EmptyState
             title="No times yet"
             body="Nobody has posted a result matching this filter. Set the mark."

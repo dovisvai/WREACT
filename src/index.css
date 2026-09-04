@@ -190,6 +190,23 @@
 }
 
 /* ============================================================================
+   Loading placeholders
+   ========================================================================== */
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+.animate-skeleton {
+  animation: skeleton-pulse 1.6s ease-in-out infinite both;
+}
+
+/* ============================================================================
    Scrollbars
    ========================================================================== */
 .no-scrollbar::-webkit-scrollbar {
@@ -208,7 +225,8 @@
 @media (prefers-reduced-motion: reduce) {
   .animate-marquee,
   .animate-count-pop,
-  .animate-rank-rise {
+  .animate-rank-rise,
+  .animate-skeleton {
     animation: none !important;
   }
 

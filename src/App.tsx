@@ -120,6 +120,7 @@ export default function App() {
   const {
     scores,
     standings,
+    isLoading,
     clock,
     lastMatchdayResults,
     liveTicker,
@@ -375,6 +376,7 @@ export default function App() {
               {worldPane === 'NATIONS' ? (
                 <WorldStandings
                   standings={standings}
+                  isLoading={isLoading}
                   clock={clock}
                   userCountry={userProfile.country}
                   lastContributionMs={lastContribution?.msImprovement ?? null}
@@ -387,6 +389,7 @@ export default function App() {
                   setCurrentMode={(m) => setActiveGameMode(m === 'ALL' ? 'CLASSIC' : m)}
                   userCountry={userProfile.country}
                   username={userProfile.username}
+                  isLoading={isLoading}
                 />
               )}
             </div>

@@ -29,6 +29,11 @@ export interface LiveData {
   clock: MatchdayClock;
   /** Final table of the last completed matchday, with medals. */
   lastMatchdayResults: MatchdayResult[];
+  /**
+   * True until the first response arrives. Distinguishes "not yet" from
+   * "nothing here", which are different claims about the world.
+   */
+  isLoading: boolean;
   liveTicker: LiveTickerEvent[];
   onlineCount: number;
   dailyChallenge: DailyChallengeInfo | null;
@@ -51,6 +56,7 @@ export function useLiveData(): LiveData {
   const [liveTicker, setLiveTicker] = useState<LiveTickerEvent[]>([]);
   const [onlineCount, setOnlineCount] = useState(0);
   const [dailyChallenge, setDailyChallenge] = useState<DailyChallengeInfo | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   const socketRef = useRef<WebSocket | null>(null);
 
@@ -69,7 +75,12 @@ export function useLiveData(): LiveData {
         if (data?.clock) setClock(data.clock);
         if (data?.lastMatchdayResults) setLastMatchdayResults(data.lastMatchdayResults);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setIsLoading(false));
+
+    // A backend that never answers must still resolve the loading state, or the
+    // skeleton spins forever instead of showing the empty case.
+    const loadTimeout = setTimeout(() => setIsLoading(false), 8000);
 
     apiFetch('/api/daily-challenge')
       .then((res) => res.json())
@@ -104,6 +115,7 @@ export function useLiveData(): LiveData {
           if (msg.lastMatchdayResults) setLastMatchdayResults(msg.lastMatchdayResults);
           if (msg.ticker) setLiveTicker(msg.ticker);
           if (msg.dailyChallenge) setDailyChallenge(msg.dailyChallenge);
+          setIsLoading(false);
         }
 
         if (msg.type === 'ONLINE_COUNT') setOnlineCount(msg.count);
@@ -145,6 +157,7 @@ export function useLiveData(): LiveData {
     });
 
     return () => {
+      clearTimeout(loadTimeout);
       ws.close();
       unsubscribe();
     };
@@ -186,6 +199,7 @@ export function useLiveData(): LiveData {
   return {
     scores,
     standings,
+    isLoading,
     clock,
     lastMatchdayResults,
     liveTicker,

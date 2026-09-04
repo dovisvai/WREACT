@@ -13,6 +13,7 @@ import {
   cx,
   EmptyState,
   Flag,
+  Skeleton,
   Label,
   Panel,
   RankBadge,
@@ -38,6 +39,7 @@ const CONTINENT_BY_CODE = new Map(COUNTRIES.map((c) => [c.code, c.continent]));
 
 interface WorldStandingsProps {
   standings: CountryStanding[];
+  isLoading: boolean;
   clock: MatchdayClock;
   userCountry: string;
   /** Change in the user's national average from their own last run, if any. */
@@ -47,6 +49,7 @@ interface WorldStandingsProps {
 
 export const WorldStandings: React.FC<WorldStandingsProps> = ({
   standings,
+  isLoading,
   clock,
   userCountry,
   lastContributionMs,
@@ -254,7 +257,9 @@ export const WorldStandings: React.FC<WorldStandingsProps> = ({
             practice and never affect a national average.
           </p>
 
-          {ranked.length === 0 ? (
+          {isLoading && ranked.length === 0 ? (
+            <Skeleton rows={7} />
+          ) : ranked.length === 0 ? (
             <EmptyState
               title="No nation has qualified yet"
               body={`A country enters the standings once ${MIN_ATHLETES_TO_QUALIFY} of its athletes have posted a time. Be the first.`}
