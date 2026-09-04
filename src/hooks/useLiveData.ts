@@ -89,21 +89,16 @@ export function useLiveData(): LiveData {
       })
       .catch(() => {});
 
-    const ws = new WebSocket(wsUrl());
-    socketRef.current = ws;
+    // The socket carries scores, standings, the clock and the ticker. On a
+    // phone it drops routinely -- screen sleep, a wifi-to-cellular handover,
+    // the app going to the background -- and with no reconnect the first drop
+    // stranded the app on the REST fallback for the rest of the session.
+    let socket: WebSocket | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+    let disposed = false;
 
-    // Prove identity once, as soon as the socket opens. The server attributes
-    // every later submission to the uid inside this token rather than trusting
-    // whatever the payload claims.
-    ws.onopen = () => {
-      getIdToken().then((token) => {
-        if (token && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'AUTH', token }));
-        }
-      });
-    };
-
-    ws.onmessage = (event) => {
+    const handleMessage = (event: MessageEvent) => {
       try {
         const msg = JSON.parse(event.data);
 
@@ -146,6 +141,52 @@ export function useLiveData(): LiveData {
       }
     };
 
+    const connect = () => {
+      if (disposed) return;
+
+      const ws = new WebSocket(wsUrl());
+      socket = ws;
+      socketRef.current = ws;
+
+      // Prove identity once, as soon as the socket opens. The server attributes
+      // every later submission to the uid inside this token rather than trusting
+      // whatever the payload claims.
+      ws.onopen = () => {
+        attempt = 0; // a connection that actually opened clears the backoff
+        getIdToken().then((token) => {
+          if (token && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'AUTH', token }));
+          }
+        });
+      };
+
+      ws.onmessage = handleMessage;
+
+      // onerror is always followed by onclose, so one path covers both.
+      ws.onclose = () => {
+        if (disposed || socketRef.current !== ws) return;
+        socketRef.current = null;
+        // Exponential backoff with jitter, capped, so an outage does not turn
+        // every client into a retry loop against a server already struggling.
+        const delay = Math.min(30_000, 1_000 * 2 ** attempt) + Math.random() * 500;
+        attempt += 1;
+        retryTimer = setTimeout(connect, delay);
+      };
+    };
+
+    connect();
+
+    // Returning to the foreground is both the likeliest moment for the socket
+    // to have died and the moment the player is about to post a score.
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (socketRef.current?.readyState === WebSocket.OPEN) return;
+      if (retryTimer) clearTimeout(retryTimer);
+      attempt = 0;
+      connect();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
     // Firestore feeds the individual athlete board and survives server restarts.
     const unsubscribe = listenToGlobalLeaderboard((liveScores) => {
       if (!liveScores?.length) return;
@@ -157,8 +198,12 @@ export function useLiveData(): LiveData {
     });
 
     return () => {
+      disposed = true;
+      document.removeEventListener('visibilitychange', onVisibility);
       clearTimeout(loadTimeout);
-      ws.close();
+      if (retryTimer) clearTimeout(retryTimer);
+      socket?.close();
+      socketRef.current = null;
       unsubscribe();
     };
   }, []);
