@@ -1,5 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import http from 'http';
+import { randomUUID } from 'crypto';
 import path from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { ScoreRecord, DailyChallengeInfo, GameMode, LiveTickerEvent, DeviceOS } from './src/types.js';
@@ -19,6 +20,7 @@ import {
 } from './src/utils/matchday.js';
 import { fetchMatchdayScores, mergeScorePools } from './src/services/scorePool.js';
 import { isRestrictedCountry } from './src/utils/restrictedCountries.js';
+import { ALL_COUNTRIES } from './src/utils/countries.js';
 import { verifyFirebaseTokenCached, bearerFrom } from './src/services/verifyToken.js';
 import { generateDevScores } from './src/utils/devSeed.js';
 import { buildDailyChallenge, dayKey } from './src/utils/dailyChallenge.js';
@@ -32,6 +34,42 @@ import { buildDailyChallenge, dayKey } from './src/utils/dailyChallenge.js';
  */
 function sanitizeDevice(value: unknown): DeviceOS | undefined {
   return value === 'iOS' || value === 'Android' || value === 'Web' ? value : undefined;
+}
+
+/**
+ * Accept a country only if it is a real ISO-3166 alpha-2 code we ship, and not
+ * a restricted one.
+ *
+ * The previous `String(country).slice(0, 3).toUpperCase()` accepted anything
+ * two or three characters long, which broke the sanctions list wide open --
+ * `isRestrictedCountry` is an exact-match lookup, so "RUS" and "RU " both
+ * sailed past a list containing "RU" and appeared in the world standings as
+ * their own nations. It also meant 46,656 possible three-letter codes could
+ * each mint a permanent standings row, and standings are re-broadcast in full
+ * to every client every second.
+ */
+const KNOWN_COUNTRY_CODES = new Set(ALL_COUNTRIES.map((c) => c.code));
+
+function sanitizeCountry(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const code = value.trim().toUpperCase();
+  if (!KNOWN_COUNTRY_CODES.has(code)) return undefined;
+  if (isRestrictedCountry(code)) return undefined;
+  return code;
+}
+
+/** Mode is a closed union; anything else is not a game we have. */
+const KNOWN_MODES: ReadonlySet<string> = new Set<GameMode>([
+  'CLASSIC',
+  'FALSE_ALARM',
+  'PATTERN_SEQUENCE',
+  'PRECISION_TARGET',
+  'REVERSE_COLOR',
+  'DAILY_CHALLENGE',
+]);
+
+function sanitizeMode(value: unknown): GameMode | undefined {
+  return typeof value === 'string' && KNOWN_MODES.has(value) ? (value as GameMode) : undefined;
 }
 
 const app = express();
@@ -214,6 +252,8 @@ interface SocketState {
   windowResetAt: number;
   /** Submissions attempted without a verified identity. */
   unauthAttempts: number;
+  /** Heartbeat liveness: cleared on each ping, set by the client's pong. */
+  alive: boolean;
 }
 
 const socketState = new WeakMap<WebSocket, SocketState>();
@@ -323,7 +363,10 @@ function rollOverMatchday(next: Matchday): void {
   localScores = IS_PRODUCTION
     ? []
     : generateDevScores(activeMatchday.startsAt, activeMatchday.endsAt);
-  scores = localScores;
+  // A distinct array, for the same reason as at initialisation: recordScore
+  // pushes to both, so sharing one reference stores every post-rollover
+  // submission twice and defeats the trim ceiling.
+  scores = [...localScores];
   previousRanks = new Map();
   recomputeStandings();
 
@@ -500,6 +543,8 @@ const liveTicker: LiveTickerEvent[] = IS_PRODUCTION
 interface DuelPlayer {
   ws: WebSocket;
   id: string;
+  /** Verified uid of the socket that owns this slot. */
+  uid: string;
   username: string;
   country: string;
   avatar: string;
@@ -512,10 +557,57 @@ interface DuelRoom {
   players: DuelPlayer[];
   status: 'waiting' | 'countdown' | 'signal' | 'finished';
   signalTimeout?: NodeJS.Timeout;
+  /** Abandons the room if nobody finishes, so no one waits forever. */
+  reapTimeout?: NodeJS.Timeout;
   signalTime?: number;
+  createdAt: number;
 }
 
 const duelRooms = new Map<string, DuelRoom>();
+
+/** Ids are opaque handles, not secrets, but guessing them should not be cheap. */
+function duelId(prefix: string): string {
+  return `${prefix}-${randomUUID().slice(0, 12)}`;
+}
+
+function closeDuelRoom(room: DuelRoom): void {
+  if (room.signalTimeout) clearTimeout(room.signalTimeout);
+  if (room.reapTimeout) clearTimeout(room.reapTimeout);
+  duelRooms.delete(room.id);
+}
+
+/**
+ * Drop a departing socket from any duel it holds.
+ *
+ * Rooms were only ever removed once both players finished, so a disconnect left
+ * the room in the Map forever -- holding a strong reference to the dead socket,
+ * and, worse, still advertised as joinable, so the next real player was matched
+ * against a ghost that could never finish and waited on the countdown screen
+ * indefinitely.
+ */
+function releaseDuelSockets(ws: WebSocket): void {
+  for (const room of Array.from(duelRooms.values())) {
+    if (!room.players.some((p) => p.ws === ws)) continue;
+
+    room.players = room.players.filter((p) => p.ws !== ws);
+
+    if (room.players.length === 0) {
+      closeDuelRoom(room);
+      continue;
+    }
+
+    // Tell whoever is left rather than stranding them on a countdown.
+    for (const p of room.players) {
+      if (p.ws.readyState === WebSocket.OPEN) {
+        p.ws.send(JSON.stringify({ type: 'DUEL_ABANDONED', reason: 'opponent_left' }));
+      }
+    }
+    closeDuelRoom(room);
+  }
+}
+
+/** No duel may outlive this, whatever happens to its sockets. */
+const DUEL_MAX_LIFETIME_MS = 90_000;
 
 // WebSocket Broadcasting
 function broadcast(data: object) {
@@ -557,7 +649,7 @@ function initStatePayload(): string {
 }
 
 wss.on('connection', (ws, req) => {
-  if (wss.clients.size > MAX_CONNECTIONS) {
+  if (wss.clients.size >= MAX_CONNECTIONS) {
     ws.close(1013, 'Server at capacity');
     return;
   }
@@ -567,6 +659,7 @@ wss.on('connection', (ws, req) => {
     messages: 0,
     windowResetAt: Date.now() + 10_000,
     unauthAttempts: 0,
+    alive: true,
   });
 
   ws.send(initStatePayload());
@@ -627,9 +720,9 @@ wss.on('connection', (ws, req) => {
 
         // Anti-cheat: only physiologically plausible reaction times are
         // recorded. Anything outside the window would corrupt a national mean.
-        const submittedCountry = String(country || 'US').slice(0, 3).toUpperCase();
+        const submittedCountry = sanitizeCountry(country);
 
-        if (isPlausibleReaction(scoreMs) && !isRestrictedCountry(submittedCountry)) {
+        if (isPlausibleReaction(scoreMs) && submittedCountry) {
           const sanitizedUsername = String(username || 'Anonymous').slice(0, 30).trim();
           const sanitizedCountry = submittedCountry;
 
@@ -639,7 +732,7 @@ wss.on('connection', (ws, req) => {
             username: sanitizedUsername,
             country: sanitizedCountry,
             scoreMs: Math.round(scoreMs),
-            mode: mode || 'CLASSIC',
+            mode: sanitizeMode(mode) ?? 'CLASSIC',
             timestamp: Date.now(),
             device: sanitizeDevice(device),
             isDaily: !!isDaily
@@ -677,25 +770,58 @@ wss.on('connection', (ws, req) => {
 
       // DUEL HANDLERS
       if (data.type === 'JOIN_DUEL') {
+        // Duels were the one write surface with no identity check at all: an
+        // unauthenticated socket could join, and the tap handler trusted a
+        // playerId out of the payload, so either player could forge the other's
+        // result. Both now require the same verified uid as a score submission.
+        const joinState = socketState.get(ws);
+        if (!joinState?.uid) {
+          ws.send(JSON.stringify({ type: 'DUEL_REJECTED', reason: 'unauthenticated' }));
+          return;
+        }
+        if (!checkRateLimit(`duel:${joinState.uid}`, 12, 60_000)) {
+          ws.send(JSON.stringify({ type: 'DUEL_REJECTED', reason: 'rate_limited' }));
+          return;
+        }
+        // One duel per player at a time, and never a duel against yourself.
+        releaseDuelSockets(ws);
+
         const { username, country, avatar } = data.payload || {};
-        let room = Array.from(duelRooms.values()).find((r) => r.status === 'waiting' && r.players.length === 1);
+        let room = Array.from(duelRooms.values()).find(
+          (r) =>
+            r.status === 'waiting' &&
+            r.players.length === 1 &&
+            r.players[0].uid !== joinState.uid
+        );
 
         const player: DuelPlayer = {
           ws,
-          id: `p-${Math.random().toString(36).substr(2, 6)}`,
-          username: String(username || 'Rival').slice(0, 30),
-          country: String(country || 'US').slice(0, 3),
+          id: duelId('p'),
+          uid: joinState.uid,
+          username: String(username || 'Rival').slice(0, 30).trim() || 'Rival',
+          country: sanitizeCountry(country) ?? 'US',
           avatar: String(avatar || '⚡').slice(0, 8)
         };
 
         if (!room) {
-          const roomId = `room-${Math.random().toString(36).substr(2, 6)}`;
           room = {
-            id: roomId,
+            id: duelId('room'),
             players: [player],
-            status: 'waiting'
+            status: 'waiting',
+            createdAt: Date.now(),
           };
-          duelRooms.set(roomId, room);
+          room.reapTimeout = setTimeout(() => {
+            const stale = duelRooms.get(room!.id);
+            if (!stale) return;
+            for (const p of stale.players) {
+              if (p.ws.readyState === WebSocket.OPEN) {
+                p.ws.send(JSON.stringify({ type: 'DUEL_ABANDONED', reason: 'timed_out' }));
+              }
+            }
+            closeDuelRoom(stale);
+          }, DUEL_MAX_LIFETIME_MS);
+          room.reapTimeout.unref?.();
+          duelRooms.set(room.id, room);
         } else {
           room.players.push(player);
         }
@@ -745,10 +871,17 @@ wss.on('connection', (ws, req) => {
       }
 
       if (data.type === 'DUEL_TAP') {
-        const { roomId, playerId, reactionMs } = data.payload || {};
-        const room = duelRooms.get(roomId);
+        const tapState = socketState.get(ws);
+        if (!tapState?.uid) return;
+
+        const { roomId, reactionMs } = data.payload || {};
+        const room = typeof roomId === 'string' ? duelRooms.get(roomId) : undefined;
         if (room) {
-          const player = room.players.find((p) => p.id === playerId);
+          // The tapping player is the one holding this socket. Taking the id
+          // from the payload let anyone submit a false start or an arbitrary
+          // time on behalf of their opponent -- and JOIN_DUEL hands out both
+          // player ids, so it did not even require guessing.
+          const player = room.players.find((p) => p.ws === ws);
           if (player) {
             if (room.status === 'countdown') {
               player.falseStart = true;
@@ -760,10 +893,18 @@ wss.on('connection', (ws, req) => {
               // fallback, and also the upper bound — a client cannot claim to
               // have reacted faster than its tap could possibly have arrived.
               const serverMeasured = Date.now() - room.signalTime;
+              // The server clock is the upper bound on a claimed time, but it
+              // is not itself a plausible reaction: a bot colocated with this
+              // instance measures a few milliseconds, failed the claim test,
+              // and was then awarded that impossible figure as its score.
+              const fallback = Math.min(
+                MAX_VALID_MS,
+                Math.max(MIN_VALID_MS, Math.round(serverMeasured))
+              );
               player.scoreMs =
                 isPlausibleReaction(reactionMs) && reactionMs <= serverMeasured
                   ? Math.round(reactionMs)
-                  : serverMeasured;
+                  : fallback;
             }
 
             const allFinished = room.players.every((p) => p.scoreMs !== undefined || p.falseStart);
@@ -785,7 +926,7 @@ wss.on('connection', (ws, req) => {
                   p.ws.send(JSON.stringify(resultPayload));
                 }
               });
-              duelRooms.delete(room.id);
+              closeDuelRoom(room);
             } else {
               room.players.forEach((p) => {
                 if (p.ws.readyState === WebSocket.OPEN) {
@@ -808,41 +949,112 @@ wss.on('connection', (ws, req) => {
     }
   });
 
+  /**
+   * Client-controlled protocol faults arrive as an 'error' event on the socket,
+   * not as an exception inside the message handler. With no listener, Node's
+   * EventEmitter rethrows and the single instance dies -- so one oversized
+   * frame from an unauthenticated peer took the whole server down, and every
+   * player with it. The frame decoder runs before the message handler, which is
+   * why its try/catch never saw this.
+   */
+  ws.on('error', (err) => {
+    console.warn('[WS] socket error, closing:', (err as Error)?.message ?? err);
+    try {
+      ws.terminate();
+    } catch {
+      /* already gone */
+    }
+  });
+
+  ws.on('pong', () => {
+    const state = socketState.get(ws);
+    if (state) state.alive = true;
+  });
+
   ws.on('close', () => {
+    releaseDuelSockets(ws);
     broadcast({ type: 'ONLINE_COUNT', count: onlineCount() });
   });
 });
+
+wss.on('error', (err) => {
+  console.error('[WS] server error:', (err as Error)?.message ?? err);
+});
+
+/**
+ * A phone that leaves cellular coverage never sends a FIN, so the socket sits
+ * half-open for hours: holding a connection slot, taking a full serialise on
+ * every one-second standings broadcast, and inflating the online count that the
+ * product presents as a real presence figure.
+ */
+const HEARTBEAT_MS = 30_000;
+const heartbeat = setInterval(() => {
+  for (const client of wss.clients) {
+    const state = socketState.get(client);
+    if (state && state.alive === false) {
+      client.terminate();
+      continue;
+    }
+    if (state) state.alive = false;
+    try {
+      client.ping();
+    } catch {
+      /* terminating already */
+    }
+  }
+}, HEARTBEAT_MS);
+heartbeat.unref?.();
 
 // REST API Endpoints
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
 });
 
+/**
+ * Cached leaderboard slices.
+ *
+ * This endpoint copied and sorted the entire in-memory pool -- up to 40,000
+ * records -- on every unauthenticated request, synchronously, on the same event
+ * loop that serves every WebSocket. A handful of concurrent callers starved the
+ * broadcast loop and the matchday tick. The answer changes only when a score
+ * lands, so it is computed at most once per second per distinct query.
+ */
+const leaderboardCache = new Map<string, { at: number; payload: string }>();
+const LEADERBOARD_TTL_MS = 1000;
+
 app.get('/api/leaderboard', (req, res) => {
-  const mode = req.query.mode as GameMode | undefined;
-  const timeframe = req.query.timeframe as string | undefined;
+  const mode = sanitizeMode(req.query.mode);
+  const timeframe = req.query.timeframe === 'today' ? 'today' : 'all';
+  const key = `${mode ?? 'ALL'}|${timeframe}`;
 
-  let filtered = [...scores];
-  if (mode && mode !== ('ALL' as unknown as GameMode)) {
-    filtered = filtered.filter((s) => s.mode === mode);
-  }
-
-  if (timeframe === 'today') {
-    const oneDayAgo = Date.now() - 86400000;
-    filtered = filtered.filter((s) => s.timestamp >= oneDayAgo);
-  }
-
-  filtered.sort((a, b) => a.scoreMs - b.scoreMs);
-  res.json({ scores: filtered.slice(0, 100) });
-});
-
-app.post('/api/score', async (req, res) => {
-  const ip = req.ip || req.socket.remoteAddress || 'unknown';
-  if (!checkRateLimit(ip)) {
-    res.status(429).json({ error: 'Too many submissions. Please slow down.' });
+  const hit = leaderboardCache.get(key);
+  if (hit && Date.now() - hit.at < LEADERBOARD_TTL_MS) {
+    res.type('application/json').send(hit.payload);
     return;
   }
 
+  const oneDayAgo = Date.now() - 86400000;
+  // One pass, no intermediate copies of the pool.
+  const filtered = scores.filter(
+    (s) =>
+      (!mode || s.mode === mode) && (timeframe !== 'today' || s.timestamp >= oneDayAgo)
+  );
+
+  filtered.sort((a, b) => a.scoreMs - b.scoreMs);
+  const payload = JSON.stringify({ scores: filtered.slice(0, 100) });
+
+  if (leaderboardCache.size > 32) leaderboardCache.clear();
+  leaderboardCache.set(key, { at: Date.now(), payload });
+  res.type('application/json').send(payload);
+});
+
+app.post('/api/score', async (req, res) => {
+  // There is deliberately no pre-auth IP bucket here. Behind a platform proxy
+  // `req.ip` is the proxy's address for every user on the planet, so a single
+  // tokenless caller could exhaust one shared window and return 429 to the
+  // entire user base -- on the exact path clients fall back to when the socket
+  // is down. Rate limiting is keyed on the verified uid below instead.
+  //
   // Identity must be proven here too — this route is the fallback the client
   // uses when the socket is down, and it is trivially callable by anyone.
   const verified = await verifyFirebaseTokenCached(bearerFrom(req.headers.authorization));
@@ -869,7 +1081,8 @@ app.post('/api/score', async (req, res) => {
   // Sanctioned and store-unavailable markets cannot be represented. Rejected
   // here as well as in the client and the database rules, because a client-only
   // check is decoration — anyone can post straight to this endpoint.
-  if (isRestrictedCountry(String(country || ''))) {
+  const restCountry = sanitizeCountry(country);
+  if (!restCountry) {
     res.status(403).json({ error: 'Entries are not accepted from this country' });
     return;
   }
@@ -878,9 +1091,9 @@ app.post('/api/score', async (req, res) => {
     id: `sc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     userId: userId ? String(userId).slice(0, 128) : undefined,
     username: String(username || 'Anonymous').slice(0, 30).trim(),
-    country: String(country || 'US').slice(0, 3).toUpperCase(),
+    country: restCountry,
     scoreMs: Math.round(scoreMs),
-    mode: mode || 'CLASSIC',
+    mode: sanitizeMode(mode) ?? 'CLASSIC',
     timestamp: Date.now(),
     device: sanitizeDevice(device),
     isDaily: !!isDaily
