@@ -16,7 +16,9 @@ export const IdleScreen: React.FC<{
   dailyTargetMs?: number | null;
   challenge: ChallengeInvite | null;
   onStart: () => void;
-}> = ({ title, brief, personalBest, dailyTargetMs, challenge, onStart }) => (
+  /** True while today's event is still loading and its mode is unknown. */
+  disabled?: boolean;
+}> = ({ title, brief, personalBest, dailyTargetMs, challenge, onStart, disabled }) => (
   <div className="w-full max-w-sm text-center">
     {challenge && (
       <div className="mb-6 rounded-md border border-signal/30 bg-signal/10 p-4">
@@ -58,8 +60,15 @@ export const IdleScreen: React.FC<{
       ) : null}
     </div>
 
-    <Button variant="signal" size="lg" full className="mt-8" onClick={onStart}>
-      Start
+    <Button
+      variant="signal"
+      size="lg"
+      full
+      className="mt-8"
+      onClick={onStart}
+      disabled={disabled}
+    >
+      {disabled ? 'Loading…' : 'Start'}
     </Button>
   </div>
 );

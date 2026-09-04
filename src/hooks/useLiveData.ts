@@ -11,6 +11,14 @@ import { getIdToken, listenToGlobalLeaderboard } from '../services/firebase';
 import { apiFetch, wsUrl } from '../services/api';
 import { matchdayClock, type MatchdayClock, type MatchdayResult } from '../utils/matchday';
 
+/**
+ * How many scores a client keeps in memory.
+ *
+ * Far more than any screen shows, and small enough that a long session on a
+ * phone does not accumulate an unbounded array.
+ */
+const MAX_CLIENT_SCORES = 500;
+
 export interface ScoreSubmission {
   userId: string;
   username: string;
@@ -131,7 +139,10 @@ export function useLiveData(): LiveData {
         }
 
         if (msg.type === 'NEW_SCORE_ADDED') {
-          setScores((prev) => [msg.score, ...prev]);
+          // Capped: every score posted by anyone in the world arrives here, and
+          // an uncapped array grew for the whole session on a memory-limited
+          // phone -- and the athlete board rescans it on every keystroke.
+          setScores((prev) => [msg.score, ...prev].slice(0, MAX_CLIENT_SCORES));
           if (msg.standings) setStandings(msg.standings);
           if (msg.ticker) setLiveTicker((prev) => [msg.ticker, ...prev.slice(0, 19)]);
           if (msg.dailyChallenge) setDailyChallenge(msg.dailyChallenge);
@@ -192,8 +203,12 @@ export function useLiveData(): LiveData {
       if (!liveScores?.length) return;
       setScores((prev) => {
         const merged = new Map<string, ScoreRecord>();
-        for (const score of [...liveScores, ...prev]) merged.set(score.id, score);
-        return Array.from(merged.values());
+        // Fresh documents last, so a newer server copy replaces the local one
+        // rather than the stale local copy winning.
+        for (const score of [...prev, ...liveScores]) merged.set(score.id, score);
+        return Array.from(merged.values())
+          .sort((a, b) => b.timestamp - a.timestamp)
+          .slice(0, MAX_CLIENT_SCORES);
       });
     });
 

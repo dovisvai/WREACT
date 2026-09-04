@@ -215,10 +215,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     <LogIn className="h-4 w-4 shrink-0 text-ink-muted" />
                     <div className="min-w-0 flex-1">
                       <div className="text-[13px] font-semibold text-ink">
-                        Sign in to keep your times
+                        Change your display name
                       </div>
                       <div className="text-[11px] text-ink-faint">
-                        Guest scores live on this device only
+                        Times already save to the cloud on this device
                       </div>
                     </div>
                     <ChevronRight className="h-4 w-4 shrink-0 text-ink-faint" />
@@ -230,7 +230,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </Panel>
 
         {/* Tabs ----------------------------------------------------------- */}
-        <Segmented
+        <Segmented<'STATS' | 'BADGES' | 'SOUND'>
           options={[
             { value: 'STATS', label: 'Stats' },
             { value: 'BADGES', label: `Badges ${unlockedCount}/${badges.length}` },

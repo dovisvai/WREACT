@@ -130,7 +130,7 @@ export const WorldStandings: React.FC<WorldStandingsProps> = ({
       {/* Filters ---------------------------------------------------------- */}
       <div className="sticky top-0 z-10 border-b border-pitch-700 bg-pitch-900/95 backdrop-blur">
         <div className="flex gap-2 overflow-x-auto no-scrollbar scroll-hint-x px-4 py-3">
-          <Segmented
+          <Segmented<ContinentFilter>
             options={CONTINENT_OPTIONS}
             value={continent}
             onChange={setContinent}

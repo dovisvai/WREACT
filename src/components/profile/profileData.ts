@@ -69,11 +69,13 @@ export function buildBadges(
       unlocked: Boolean(standing && best > 0 && best <= standing.bestMs),
     },
     {
-      id: 'verified',
-      name: 'Verified',
+      id: 'centurion',
+      name: 'Centurion',
       icon: '🛡️',
-      desc: 'Sign in to sync across devices',
-      unlocked: Boolean(profile.isLoggedIn),
+      desc: 'Complete 100 runs',
+      // Replaces a "Verified" badge that was unlocked by a sign-in which did
+      // not authenticate anything, so the shield stood for nothing.
+      unlocked: (profile.testsCompleted || 0) >= 100,
     },
   ];
 }

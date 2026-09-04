@@ -155,21 +155,15 @@ export default function App() {
     });
   }, []);
 
-  const handleLoginSuccess = (authData: {
-    username: string;
-    email: string;
-    authProvider: 'google' | 'apple';
-    verifiedAthlete: boolean;
-    photoUrl?: string;
-  }) => {
-    saveUserProfile({
-      username: authData.username,
-      email: authData.email,
-      authProvider: authData.authProvider,
-      verifiedAthlete: authData.verifiedAthlete,
-      isLoggedIn: true,
-      photoUrl: authData.photoUrl,
-    });
+  /**
+   * The only identity a player actually controls.
+   *
+   * There is no sign-in: the device is signed in anonymously at boot and scores
+   * already sync under that uid. What used to live here was a simulated Google
+   * login that fabricated an email and granted the Verified badge for nothing.
+   */
+  const handleSaveName = (username: string) => {
+    saveUserProfile({ username });
   };
 
   const handleSignOut = () => {
@@ -363,7 +357,7 @@ export default function App() {
         {activeTab === 'WORLD' && (
           <div className="flex h-full flex-col">
             <div className="border-b border-pitch-700 px-4 py-3">
-              <Segmented
+              <Segmented<'NATIONS' | 'ATHLETES'>
                 options={[
                   { value: 'NATIONS', label: 'Nations' },
                   { value: 'ATHLETES', label: 'Athletes' },
@@ -466,8 +460,7 @@ export default function App() {
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
         userProfile={userProfile}
-        onLoginSuccess={handleLoginSuccess}
-        onSignOut={handleSignOut}
+        onSaveName={handleSaveName}
       />
 
       <MonetizationModal

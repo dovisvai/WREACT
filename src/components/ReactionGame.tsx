@@ -7,7 +7,10 @@ import {
   PlayerContribution,
 } from '../types';
 import { playSignalSound, playClickSound, playErrorSound, playFanfareSound } from '../utils/audio';
-import { MAX_VALID_MS, isPlausibleReaction } from '../utils/standings';
+import { MAX_VALID_MS, MIN_VALID_MS, isPlausibleReaction } from '../utils/standings';
+
+/** How long after a round starts a tap is treated as the tail of a double-tap. */
+const DOUBLE_TAP_GRACE_MS = 250;
 import { MODE_LABELS } from '../utils/dailyChallenge';
 import { MODES } from './game/modes';
 import { haptic } from '../services/native';
@@ -90,7 +93,16 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
    * flagged as a daily entry.
    */
   const isDailyEntry = mode === 'DAILY_CHALLENGE';
-  const playMode: GameMode = isDailyEntry ? dailyMode ?? 'CLASSIC' : mode;
+  /**
+   * Which discipline this round actually is.
+   *
+   * The daily used to fall back to CLASSIC while the event was still loading,
+   * so a cold launch on a slow network played -- and recorded, as the one
+   * ranked mode -- Classic on a day whose real event was something else. Null
+   * means "not known yet", and the screen waits rather than guessing.
+   */
+  const playMode: GameMode | null = isDailyEntry ? dailyMode ?? null : mode;
+  const dailyPending = isDailyEntry && !dailyMode;
 
   const activeMode = MODES.find((m) => m.id === playMode) ?? MODES[0];
 
@@ -98,6 +110,7 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
     // Personal bests written before score validation existed can be nonsense
     // (a forgotten tab produces a 45-second "reaction"). Discard on read rather
     // than trusting whatever is in storage.
+    if (!playMode) return;
     const saved = Number.parseInt(localStorage.getItem(`pb_${playMode}`) ?? '', 10);
     if (isPlausibleReaction(saved)) {
       setPersonalBest(saved);
@@ -118,6 +131,9 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
     []
   );
 
+  /** When the current wait began, for the double-tap guard above. */
+  const waitStartedAtRef = useRef(0);
+
   const triggerSignal = useCallback(() => {
     if (playMode === 'PRECISION_TARGET') {
       setTargetPos({ x: 20 + Math.random() * 60, y: 20 + Math.random() * 60 });
@@ -130,6 +146,12 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
   }, [playMode, audioEnabled]);
 
   const startTest = useCallback(() => {
+    waitStartedAtRef.current = Date.now();
+
+    // Today's event has not arrived yet. Starting here would silently play the
+    // wrong discipline and record it as a ranked Classic run.
+    if (!playMode) return;
+
     if (audioEnabled) playClickSound();
     haptic.medium();
     setReactionTime(null);
@@ -173,6 +195,18 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
     (elapsed: number) => {
       const ms = Math.round(elapsed);
       setReactionTime(ms);
+
+      // Below the floor is not a reaction either -- it is an anticipated tap or
+      // a synthetic event. Treated as a false start rather than a record,
+      // because taking the RESULT path let it overwrite the stored personal
+      // best with a number the submission guard would then refuse, and the
+      // next mount deleted the bogus value along with the real best.
+      if (ms < MIN_VALID_MS) {
+        setTestState('FALSE_START');
+        if (audioEnabled) playErrorSound();
+        haptic.error();
+        return;
+      }
 
       // A time this long is inattention, not a reaction. Show it, explain it,
       // and keep it out of the player's record and their national average.
@@ -230,6 +264,13 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
       e?.stopPropagation();
 
       if (testState === 'WAITING' || testState === 'TRAP_WARNING') {
+        // Start is a Button, so it fires on release; the WAITING overlay is
+        // full-bleed and already mounted by then. Without this window, the
+        // second tap of an ordinary double-tap on Start / Go again lands on the
+        // overlay and is scored as going early -- and the retry button has the
+        // same problem, so it loops.
+        if (Date.now() - waitStartedAtRef.current < DOUBLE_TAP_GRACE_MS) return;
+
         if (timerRef.current) clearTimeout(timerRef.current);
         setTestState('FALSE_START');
         if (audioEnabled) playErrorSound();
@@ -242,6 +283,23 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
       }
     },
     [testState, audioEnabled, recordResult]
+  );
+
+  /**
+   * A tap on empty space during PRECISION_TARGET.
+   *
+   * Deliberately does not end the round: the clock keeps running until the
+   * target is actually hit, so a miss costs the time it takes to correct. That
+   * is what makes distance matter in this mode, and it is a fairer penalty than
+   * voiding the attempt outright.
+   */
+  const handleMiss = useCallback(
+    (e?: React.PointerEvent) => {
+      e?.stopPropagation();
+      if (testState !== 'SIGNAL') return;
+      haptic.light();
+    },
+    [testState]
   );
 
   const handlePatternTap = (index: number) => {
@@ -306,10 +364,13 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
           <IdleScreen
             title={isDailyEntry ? "Today's event" : activeMode.title}
             brief={
-              isDailyEntry
+              dailyPending
+                ? 'Loading today’s discipline…'
+                : isDailyEntry && playMode
                 ? `${MODE_LABELS[playMode]} — ${activeMode.brief}`
                 : activeMode.brief
             }
+            disabled={dailyPending}
             dailyTargetMs={isDailyEntry ? dailyTargetMs : null}
             personalBest={personalBest}
             challenge={challenge}
@@ -371,7 +432,12 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
         )}
 
         {testState === 'SIGNAL' && playMode === 'PRECISION_TARGET' && (
-          <div className="absolute inset-0 cursor-crosshair" onPointerDown={handleTap}>
+          // Missing the target is a miss, not a score. The wrapper used to call
+          // the same handleTap as the target itself, so tapping any blank pixel
+          // recorded a time -- the mode was Classic with a decorative circle,
+          // and its daily ("movement time counts, so distance matters") was
+          // won by tapping wherever your thumb already rested.
+          <div className="absolute inset-0 cursor-crosshair" onPointerDown={handleMiss}>
             <button
               type="button"
               onPointerDown={handleTap}
