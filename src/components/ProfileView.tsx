@@ -1,19 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import {
-  Check,
-  ChevronRight,
-  Edit3,
-  FileText,
-  Lock,
-  LogIn,
-  Search,
-  Trash2,
-  X,
-} from 'lucide-react';
+import { ChevronRight, Edit3, FileText, Lock, LogIn, Trash2, X } from 'lucide-react';
 import { CountryStanding, UserProfile } from '../types';
 import {
   AVATARS,
-  COUNTRIES,
   getCountryFlag,
   getCountryName,
   getPercentileRating,
@@ -60,9 +49,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [tab, setTab] = useState<'STATS' | 'BADGES' | 'SOUND'>('STATS');
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(profile.username);
-  const [country, setCountry] = useState(profile.country);
   const [avatar, setAvatar] = useState(profile.avatar);
-  const [countrySearch, setCountrySearch] = useState('');
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [legalTab, setLegalTab] = useState<'PRIVACY' | 'TERMS' | 'EULA' | null>(null);
 
@@ -83,18 +70,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
   const unlockedCount = badges.filter((b) => b.unlocked).length;
 
-  const filteredCountries = useMemo(() => {
-    const query = countrySearch.trim().toLowerCase();
-    if (!query) return COUNTRIES.slice(0, 40);
-    return COUNTRIES.filter(
-      (c) => c.name.toLowerCase().includes(query) || c.code.toLowerCase().includes(query)
-    ).slice(0, 40);
-  }, [countrySearch]);
 
   const saveEdits = () => {
+    // Nation is deliberately absent: it is immutable after onboarding and the
+    // database rejects a change, so sending it would only produce a failed write.
     onUpdateProfile({
       username: name.trim() || 'Athlete',
-      country,
       avatar,
     });
     setEditing(false);
@@ -156,43 +137,28 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 />
               </div>
 
+              {/* Nation is fixed once chosen, so the editor states it rather
+                  than offering a picker that the database would reject. */}
               <div>
                 <Label as="div" className="mb-1.5">
                   Nation
                 </Label>
-                <div className="relative mb-2">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint" />
-                  <input
-                    type="text"
-                    value={countrySearch}
-                    onChange={(e) => setCountrySearch(e.target.value)}
-                    placeholder="Search"
-                    className="h-9 w-full rounded-md border border-pitch-700 bg-pitch-800 pl-9 pr-3 text-sm text-ink placeholder:text-ink-faint focus:border-pitch-500 focus:outline-none"
+                <div className="flex items-center gap-3 rounded-md border border-pitch-700 bg-pitch-800 px-3 py-2.5">
+                  <Flag
+                    code={profile.country}
+                    emoji={getCountryFlag(profile.country)}
+                    className="text-xl"
                   />
-                </div>
-                <div className="max-h-40 overflow-y-auto no-scrollbar rounded-md border border-pitch-700">
-                  {filteredCountries.map((c) => (
-                    <button
-                      key={c.code}
-                      type="button"
-                      onClick={() => setCountry(c.code)}
-                      className={cx(
-                        'flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors',
-                        country === c.code
-                          ? 'bg-signal/10 text-ink'
-                          : 'text-ink-muted hover:bg-pitch-800'
-                      )}
-                    >
-                      <Flag code={c.code} emoji={c.flag} className="text-base" />
-                      <span className="truncate font-medium">{c.name}</span>
-                      {country === c.code && (
-                        <Check className="ml-auto h-3.5 w-3.5 text-signal" />
-                      )}
-                    </button>
-                  ))}
+                  <span className="flex-1 text-sm font-semibold text-ink">
+                    {getCountryName(profile.country)}
+                  </span>
+                  <Lock className="h-3.5 w-3.5 text-ink-faint" />
                 </div>
                 <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
-                  Changing nation moves your best time to that country's average.
+                  Your nation is set once and cannot be changed. The world table is
+                  one average per country, so athletes moving between them would
+                  let anyone choose which nation their time counts for. Deleting
+                  your account lets you start again.
                 </p>
               </div>
 

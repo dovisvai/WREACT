@@ -67,6 +67,15 @@ service cloud.firestore {
              || isNonEmptyString(request.resource.data.username, 30))
         && (!('country' in request.resource.data)
              || isAcceptedCountry(request.resource.data.country))
+        // Your nation is chosen once and then fixed.
+        //
+        // Without this an athlete can hop between countries and decide which
+        // national average their time lands in — picking a small nation to
+        // spike, or moving on once it is ranked. The whole table is one number
+        // per country, so who is allowed to be in that number has to be stable.
+        // Changing nation now means deleting the account, which the app offers.
+        && (!resource.data.keys().hasAny(['country'])
+             || request.resource.data.country == resource.data.country)
         // Matches the same floor the scores collection enforces, so a profile
         // cannot advertise a best time the scores table would have rejected.
         && (!('bestScore' in request.resource.data)
@@ -93,7 +102,14 @@ service cloud.firestore {
         && isPlausibleReaction(request.resource.data.scoreMs)
         && isKnownMode(request.resource.data.mode)
         && isNonEmptyString(request.resource.data.username, 30)
-        && isAcceptedCountry(request.resource.data.country);
+        && isAcceptedCountry(request.resource.data.country)
+        // A score must be posted for the athlete's own nation. Locking the
+        // profile alone is not enough: a raw write could still claim any
+        // country. Costs one document read per score, which is the right
+        // trade for the one number this product exists to report.
+        && (!exists(/databases/$(database)/documents/athletes/$(request.auth.uid))
+             || get(/databases/$(database)/documents/athletes/$(request.auth.uid))
+                  .data.country == request.resource.data.country);
 
       allow update: if false; // Scores are immutable once recorded.
       allow delete: if isAuthenticated() && request.auth.uid == resource.data.userId;

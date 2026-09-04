@@ -178,6 +178,17 @@ const wss = new WebSocketServer({
   },
 });
 
+/**
+ * How many people are actually here.
+ *
+ * This was `clients.size + 120`, so a solo visitor was told 121 people were
+ * online. In an app whose entire premise is one honest number, padding the
+ * presence count is the same lie in a smaller font.
+ */
+function onlineCount(): number {
+  return wss.clients.size;
+}
+
 /** Refuse new sockets past this, so one host cannot exhaust file descriptors. */
 const MAX_CONNECTIONS = Number(process.env.MAX_WS_CONNECTIONS) || 5000;
 
@@ -451,12 +462,25 @@ setInterval(() => {
 }, 60 * 1000).unref?.();
 
 // Recent Live Score Ticker
-const liveTicker: LiveTickerEvent[] = [
-  { id: 't1', username: 'Liam', country: 'GB', scoreMs: 182, mode: 'CLASSIC', timestamp: Date.now() - 15000 },
-  { id: 't2', username: 'Kenji', country: 'JP', scoreMs: 164, mode: 'DAILY_CHALLENGE', timestamp: Date.now() - 28000 },
-  { id: 't3', username: 'Mateo', country: 'ES', scoreMs: 195, mode: 'FALSE_ALARM', timestamp: Date.now() - 42000 },
-  { id: 't4', username: 'Sofia', country: 'IT', scoreMs: 178, mode: 'CLASSIC', timestamp: Date.now() - 55000 }
-];
+/**
+ * The live results ticker.
+ *
+ * Empty in production. It previously shipped four invented athletes — Liam,
+ * Kenji, Mateo and Sofia — who would have scrolled across the top of the app
+ * on launch day presenting fabricated results as live activity. The ticker
+ * component renders nothing until there is something real to show, which is
+ * the honest state for a leaderboard with no players in it yet.
+ *
+ * Development keeps the sample rows so the marquee can be worked on.
+ */
+const liveTicker: LiveTickerEvent[] = IS_PRODUCTION
+  ? []
+  : [
+      { id: 't1', username: 'Liam', country: 'GB', scoreMs: 182, mode: 'CLASSIC', timestamp: Date.now() - 15000 },
+      { id: 't2', username: 'Kenji', country: 'JP', scoreMs: 164, mode: 'DAILY_CHALLENGE', timestamp: Date.now() - 28000 },
+      { id: 't3', username: 'Mateo', country: 'ES', scoreMs: 195, mode: 'FALSE_ALARM', timestamp: Date.now() - 42000 },
+      { id: 't4', username: 'Sofia', country: 'IT', scoreMs: 178, mode: 'CLASSIC', timestamp: Date.now() - 55000 }
+    ];
 
 // Duel Rooms Manager
 interface DuelPlayer {
@@ -504,7 +528,7 @@ function initStatePayload(): string {
   if (initStateStale || !initStateCache) {
     initStateCache = JSON.stringify({
       type: 'INIT_STATE',
-      onlinePlayers: wss.clients.size + 120,
+      onlinePlayers: onlineCount(),
       // Only the ranked slice travels to clients; the full pool stays server-side.
       scores: rankedSliceCache,
       standings: standingsCache,
@@ -533,7 +557,7 @@ wss.on('connection', (ws, req) => {
 
   ws.send(initStatePayload());
 
-  broadcast({ type: 'ONLINE_COUNT', count: wss.clients.size + 120 });
+  broadcast({ type: 'ONLINE_COUNT', count: onlineCount() });
 
   ws.on('message', async (message) => {
     if (!allowMessage(ws)) {
@@ -771,7 +795,7 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
-    broadcast({ type: 'ONLINE_COUNT', count: wss.clients.size + 120 });
+    broadcast({ type: 'ONLINE_COUNT', count: onlineCount() });
   });
 });
 
