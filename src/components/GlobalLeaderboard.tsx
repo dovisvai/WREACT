@@ -81,7 +81,7 @@ export const GlobalLeaderboard: React.FC<GlobalLeaderboardProps> = ({
     <Screen className="bg-pitch-900">
       <div className="sticky top-0 z-10 space-y-3 border-b border-pitch-700 bg-pitch-900/95 px-4 py-3 backdrop-blur">
         <div className="flex items-center justify-between gap-2">
-          <div className="min-w-0 overflow-x-auto no-scrollbar">
+          <div className="min-w-0 overflow-x-auto no-scrollbar scroll-hint-x">
             <Segmented options={MODE_OPTIONS} value={currentMode} onChange={setCurrentMode} />
           </div>
           <Segmented

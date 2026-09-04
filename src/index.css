@@ -218,6 +218,28 @@
   scrollbar-width: none;
 }
 
+/* ----------------------------------------------------------------------------
+   Scroll affordance for horizontal strips.
+
+   The mode strip carries 585px of tabs into a 384px phone viewport, so two
+   whole game modes sat off-screen while `no-scrollbar` removed the only hint
+   that anything was there. These edge highlights use the local/scroll
+   background trick: the covering panels are attached to the content and scroll
+   away with it, so a highlight shows only on a side that still has more to
+   reach, and disappears once you get there. No JS, no scroll listener.
+   ------------------------------------------------------------------------- */
+.scroll-hint-x {
+  background-image:
+    linear-gradient(to right, var(--color-pitch-900) 40%, transparent),
+    linear-gradient(to left, var(--color-pitch-900) 40%, transparent),
+    linear-gradient(to right, rgb(255 255 255 / 0.20), transparent),
+    linear-gradient(to left, rgb(255 255 255 / 0.20), transparent);
+  background-position: left center, right center, left center, right center;
+  background-repeat: no-repeat;
+  background-size: 26px 100%, 26px 100%, 13px 100%, 13px 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+
 /* ============================================================================
    Respect the system setting. A reaction game with disabled motion should
    still flash the signal instantly — only the decorative motion is removed.

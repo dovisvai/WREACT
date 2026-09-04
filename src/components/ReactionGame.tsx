@@ -279,7 +279,7 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
   return (
     <div className="no-touch-callout flex h-full flex-col bg-pitch-900">
       {/* Mode rail ------------------------------------------------------- */}
-      <div className="flex shrink-0 gap-1.5 overflow-x-auto no-scrollbar border-b border-pitch-700 px-4 py-2.5">
+      <div className="flex shrink-0 gap-1.5 overflow-x-auto no-scrollbar scroll-hint-x border-b border-pitch-700 px-4 py-2.5">
         {MODES.map(({ id, label, Icon }) => (
           <button
             key={id}
