@@ -34,6 +34,7 @@ import { buildPushTags, syncPushTags } from './services/push';
 import {
   submitReactionScoreToFirebase,
   syncUserProfileToFirebase,
+  deleteAccountAndData,
 } from './services/firebase';
 import { useLiveData } from './hooks/useLiveData';
 import { useAppBoot } from './hooks/useAppBoot';
@@ -175,7 +176,19 @@ export default function App() {
     });
   };
 
-  const handleDeleteAccount = () => {
+  const handleDeleteAccount = async () => {
+    // Remote first. Clearing localStorage alone left the athlete document and
+    // every score in Firestore -- both world-readable -- so the player stayed
+    // on the public leaderboard after being told their data was purged.
+    const result = await deleteAccountAndData();
+    if (!result.ok) {
+      console.warn('[WREACT] Remote deletion failed; local data left intact:', result.error);
+      window.alert(
+        'Your data could not be deleted right now. Check your connection and try again — nothing has been removed.'
+      );
+      return;
+    }
+
     localStorage.clear();
     setUserProfile({
       id: `u-${Math.random().toString(36).slice(2, 8)}`,

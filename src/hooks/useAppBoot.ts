@@ -73,17 +73,45 @@ export function useAppBoot({
       const remote = await fetchAthleteProfile();
       if (!cancelled && remote) {
         setUserProfile((prev) => {
-          const isFreshInstall = !prev.testsCompleted && !prev.bestScore;
-          if (!isFreshInstall) return prev;
+          /**
+           * Merge rather than choose.
+           *
+           * The old test was "does this install have any history", evaluated
+           * after two network round trips during which the app is fully
+           * playable on the default tab. Posting a single time in that window
+           * set testsCompleted to 1, the restore then decided this was not a
+           * fresh install and discarded the cloud profile -- and the next save
+           * pushed the near-empty local one up, destroying the real history in
+           * both places. Taking the better of each field cannot lose data
+           * whichever way the race falls.
+           */
+          const merged: UserProfile = { ...prev };
 
-          const restored: UserProfile = {
-            ...prev,
-            ...Object.fromEntries(
-              Object.entries(remote).filter(([, value]) => value !== undefined)
-            ),
-          };
-          localStorage.setItem('world_reaction_user', JSON.stringify(restored));
-          return restored;
+          if (remote.username && !prev.testsCompleted) merged.username = remote.username;
+          if (remote.avatar && !prev.testsCompleted) merged.avatar = remote.avatar;
+          // The nation is immutable once set, so the stored one is canonical.
+          if (remote.country) merged.country = remote.country;
+
+          merged.testsCompleted = Math.max(prev.testsCompleted || 0, remote.testsCompleted || 0);
+          merged.streakDays = Math.max(prev.streakDays || 0, remote.streakDays || 0);
+
+          // Best means fastest, so the smaller positive number wins.
+          const bests = [prev.bestScore, remote.bestScore].filter(
+            (v): v is number => typeof v === 'number' && v > 0
+          );
+          if (bests.length) merged.bestScore = Math.min(...bests);
+
+          merged.unlockedBadges = Array.from(
+            new Set([...(prev.unlockedBadges || []), ...(remote.unlockedBadges || [])])
+          );
+          merged.proPassActive = Boolean(prev.proPassActive || remote.proPassActive);
+
+          try {
+            localStorage.setItem('world_reaction_user', JSON.stringify(merged));
+          } catch {
+            /* storage may be full or unavailable; state is still correct */
+          }
+          return merged;
         });
       }
 

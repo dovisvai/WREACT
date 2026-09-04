@@ -226,9 +226,10 @@ class RevenueCatService {
 
     if (this.isSimulated) {
       if (isNative() && !hasRealKeys()) {
-        console.warn(
-          '[RevenueCat] Native platform detected but the API key is still a placeholder. ' +
-            'Set VITE_REVENUECAT_IOS_KEY / VITE_REVENUECAT_ANDROID_KEY to enable purchases.'
+        console.error(
+          '[RevenueCat] SHIPPING MISCONFIGURATION: native build with a placeholder ' +
+            'API key. Purchases are disabled and the paywall will refuse. Set ' +
+            'VITE_REVENUECAT_ANDROID_KEY / VITE_REVENUECAT_IOS_KEY and rebuild.'
         );
       }
       return;
@@ -291,8 +292,29 @@ class RevenueCatService {
     pkg: RevenueCatPackageInfo
   ): Promise<{ success: boolean; cancelled: boolean; customerInfo: RevenueCatCustomerState }> {
     if (this.isSimulated || !pkg.native) {
-      // Preview mode: unlock locally so the paywall and Pro states are testable
-      // in a browser. This grants nothing on a real device.
+      /**
+       * On a device, this branch is a misconfiguration, not a preview.
+       *
+       * The keys fall back to `..._REPLACE_WITH_...` placeholders when the
+       * VITE_ vars are absent at build time, which makes `isSimulated` true on
+       * real hardware -- so tapping Subscribe granted Pro, reported success,
+       * and never showed a Play billing sheet or charged anyone. Refuse
+       * instead: an unconfigured build must fail visibly rather than hand out
+       * an entitlement it cannot sell.
+       */
+      if (isNative()) {
+        console.error(
+          '[RevenueCat] Refusing to grant Pro: this native build has no real API key. ' +
+            'Set VITE_REVENUECAT_ANDROID_KEY (or _IOS_KEY) and rebuild.'
+        );
+        return {
+          success: false,
+          cancelled: false,
+          customerInfo: await this.getCustomerInfo(),
+        };
+      }
+
+      // Browser preview only, so the paywall and Pro states stay testable.
       localStorage.setItem('wreact_preview_pro', 'true');
       return { success: true, cancelled: false, customerInfo: this.previewCustomerState() };
     }
@@ -352,7 +374,11 @@ class RevenueCatService {
   }
 
   private previewCustomerState(): RevenueCatCustomerState {
-    const isPro = localStorage.getItem('wreact_preview_pro') === 'true';
+    // The preview unlock is a browser affordance and must never confer an
+    // entitlement on a device. Reading it on native would let a flag written by
+    // an earlier misconfigured build keep reporting an active subscription
+    // through getCustomerInfo and restorePurchases.
+    const isPro = !isNative() && localStorage.getItem('wreact_preview_pro') === 'true';
 
     return {
       originalAppUserId: this.appUserId || 'preview-user',

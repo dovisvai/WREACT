@@ -25,10 +25,11 @@ export const AccountDeletionModal: React.FC<AccountDeletionModalProps> = ({
     setIsDeleting(true);
     triggerHaptic([50, 50, 100]);
 
-    setTimeout(() => {
-      setIsDeleting(false);
-      onConfirmDelete();
-    }, 1000);
+    // Previously a 1s setTimeout that was never stored or cleared, while the
+    // Cancel and X buttons stayed enabled: tapping Cancel closed the modal and
+    // then deleted the account anyway a second later. The work is real and
+    // awaited now, so there is nothing to cancel into.
+    onConfirmDelete();
   };
 
   return (
@@ -42,7 +43,7 @@ export const AccountDeletionModal: React.FC<AccountDeletionModalProps> = ({
             </div>
             <div>
               <h2 className="text-base font-black text-ink">Delete Athlete Account</h2>
-              <span className="text-[10px] font-mono text-alert">Apple Guideline 5.1.1(v) Compliant</span>
+              <span className="text-[10px] font-mono text-alert">Permanent and irreversible</span>
             </div>
           </div>
           <button

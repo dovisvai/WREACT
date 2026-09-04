@@ -27,8 +27,8 @@ export const LegalModal: React.FC<LegalModalProps> = ({
               <ShieldCheck className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-extrabold text-ink">Legal & App Store Compliance</h2>
-              <p className="text-[11px] text-ink-faint">App Store Review Guideline 5.1 & EULA</p>
+              <h2 className="text-base font-extrabold text-ink">Legal &amp; Store Compliance</h2>
+              <p className="text-[11px] text-ink-faint">Privacy, subscriptions and your data</p>
             </div>
           </div>
           <button
@@ -85,17 +85,21 @@ export const LegalModal: React.FC<LegalModalProps> = ({
               <p>
                 - <strong>Reaction Performance Data:</strong> Millisecond response times, false starts, touch coordinates, and game mode records.
                 <br />
-                - <strong>Account & Identity:</strong> Nickname, avatar selection, and optional Apple ID Private Relay or Google email address when signed in.
+                - <strong>Account &amp; Identity:</strong> A display name and avatar you choose, tied to an anonymous account created automatically on this device. No email address, phone number or real name is collected.
                 <br />
-                - <strong>Country Geolocation:</strong> Coarse country code (e.g., US, DE, JP, LT) requested via device GPS or derived from timezone to assign national World Cup leaderboard rankings.
+                - <strong>Country:</strong> The nation you pick when you first open the app, suggested from your device time zone. No location permission is requested and GPS is never used.
               </p>
 
               <h3 className="text-sm font-bold text-ink">2. In-App Purchases (RevenueCat)</h3>
               <p>
-                We use RevenueCat to process and validate Apple App Store receipts. RevenueCat receives an anonymous App User ID and purchase receipts to unlock VIP entitlements across your Apple devices without exposing credit card details.
+                We use RevenueCat to validate Google Play purchase receipts. RevenueCat receives an anonymous App User ID and the receipt, which unlocks your entitlement without exposing any payment details to us.
               </p>
 
-              <h3 className="text-sm font-bold text-ink">3. Your Rights & Account Deletion (Apple Guideline 5.1.1(v))</h3>
+              <h3 className="text-sm font-bold text-ink">3. Your Rights &amp; Account Deletion</h3>
+              <p className="text-ink-muted">
+                Your display name, nation and reaction times are shown on a public
+                leaderboard and are readable by anyone using the app.
+              </p>
               <p>
                 You may permanently delete your profile, scores, and cloud records at any time directly from the <strong>Profile & Settings</strong> tab using the "Delete Athlete Account" action. All data is purged immediately.
               </p>
@@ -129,18 +133,18 @@ export const LegalModal: React.FC<LegalModalProps> = ({
           {tab === 'EULA' && (
             <div className="space-y-3">
               <div className="bg-yellow-950/40 border border-gold/30 rounded-2xl p-3 text-gold">
-                <strong>Standard Apple Licensed Application End User License Agreement (EULA):</strong> This application adheres to Apple's Standard EULA terms for auto-renewable subscriptions.
+                <strong>Subscription terms:</strong> WREACT Pro is an auto-renewing subscription sold through Google Play.
               </div>
 
               <h3 className="text-sm font-bold text-ink">1. Pro Athlete Subscription Terms</h3>
               <p>
-                - <strong>Payment:</strong> Charged to your Apple ID Account at confirmation of purchase.
+                - <strong>Payment:</strong> Charged to your Google Play account at confirmation of purchase.
                 <br />
                 - <strong>Renewal:</strong> Subscription automatically renews unless auto-renew is turned off at least 24 hours before the end of the current billing cycle.
                 <br />
-                - <strong>Account Charge:</strong> Your Apple ID account will be charged for renewal within 24 hours prior to the end of the current period.
+                - <strong>Renewal:</strong> Your Google Play account is charged for renewal within 24 hours before the end of the current period.
                 <br />
-                - <strong>Managing Subscriptions:</strong> You can manage or cancel your subscription anytime in your Apple ID Account Settings after purchase.
+                - <strong>Managing subscriptions:</strong> Manage or cancel anytime at play.google.com/store/account/subscriptions, or in the Play Store app under Payments &amp; subscriptions.
               </p>
 
               <h3 className="text-sm font-bold text-ink">2. Free Trial Details</h3>
@@ -150,12 +154,12 @@ export const LegalModal: React.FC<LegalModalProps> = ({
 
               <div className="flex items-center gap-2 pt-2">
                 <a
-                  href="https://www.apple.com/legal/internet-services/itunes/dev/stdeula/"
+                  href="https://play.google.com/store/account/subscriptions"
                   target="_blank"
                   rel="noreferrer"
                   className="text-xs text-gold hover:underline flex items-center gap-1 font-bold"
                 >
-                  <span>Read Official Apple Standard EULA</span>
+                  <span>Manage subscriptions in Google Play</span>
                   <ExternalLink className="w-3 h-3" />
                 </a>
               </div>

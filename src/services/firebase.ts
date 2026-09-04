@@ -6,6 +6,7 @@ import {
   signInAnonymously,
   signOut,
   onAuthStateChanged,
+  deleteUser,
   type User,
 } from 'firebase/auth';
 import {
@@ -21,6 +22,9 @@ import {
   addDoc,
   onSnapshot,
   serverTimestamp,
+  deleteDoc,
+  where,
+  writeBatch,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { ScoreRecord, UserProfile } from '../types';
@@ -231,6 +235,66 @@ export async function fetchAthleteProfile(): Promise<Partial<UserProfile> | null
   } catch (err) {
     console.warn('[Firebase] Profile restore failed:', err);
     return null;
+  }
+}
+
+/**
+ * Erase this athlete: their scores, their profile, and the account itself.
+ *
+ * "Delete account and data" previously cleared localStorage and nothing else.
+ * The athlete document and every score survived in Firestore, both of which are
+ * world-readable, so the player's name, nation and times stayed on the public
+ * leaderboard permanently while the app told them everything had been wiped.
+ *
+ * Worse, the anonymous uid lives in IndexedDB and survived too, so after
+ * "deleting" the user picked a new nation, the locked-country rule rejected the
+ * profile write, and then every subsequent score was refused for mismatching a
+ * profile they could no longer see. The install was quietly finished.
+ *
+ * Returns how much was removed so the UI can be honest if part of it failed.
+ */
+export async function deleteAccountAndData(): Promise<{
+  ok: boolean;
+  scoresDeleted: number;
+  error?: string;
+}> {
+  const user = await ensureSignedIn();
+  if (!user) return { ok: false, scoresDeleted: 0, error: 'not-signed-in' };
+  const uid = user.uid;
+  let scoresDeleted = 0;
+
+  try {
+    // Scores first: the rules allow an owner to delete their own, and doing
+    // this before the athlete doc means a partial failure still leaves a
+    // consistent profile rather than orphaned times.
+    for (;;) {
+      const page = await getDocs(
+        query(collection(db, SCORES_COLLECTION), where('userId', '==', uid), limit(400))
+      );
+      if (page.empty) break;
+
+      const batch = writeBatch(db);
+      page.docs.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+      scoresDeleted += page.size;
+
+      if (page.size < 400) break;
+    }
+
+    await deleteDoc(doc(db, ATHLETES_COLLECTION, uid));
+
+    // Finally the identity itself, so a reinstall is genuinely a new athlete
+    // and the locked nation does not follow them.
+    await deleteUser(user);
+    authReady = null;
+
+    return { ok: true, scoresDeleted };
+  } catch (err) {
+    const message = (err as { code?: string; message?: string })?.code
+      ?? (err as Error)?.message
+      ?? 'unknown';
+    console.warn('[Firebase] Account deletion failed:', err);
+    return { ok: false, scoresDeleted, error: message };
   }
 }
 

@@ -1,6 +1,7 @@
 import { Share } from '@capacitor/share';
 import { ChallengeInvite, GameMode } from '../types';
 import { getCountryFlag, getCountryName } from '../utils/countries';
+import { isNative } from './native';
 
 /**
  * The share pipeline.
@@ -10,11 +11,24 @@ import { getCountryFlag, getCountryName } from '../utils/countries';
  * head-to-head against the sender's time.
  */
 
-/** Public origin used in share links. Replace at launch with the real domain. */
-export const SHARE_ORIGIN =
-  typeof window !== 'undefined' && window.location.origin.startsWith('http')
-    ? window.location.origin
-    : 'https://wreact.app';
+/**
+ * Public origin used in share links.
+ *
+ * Capacitor serves the Android bundle from `https://localhost`, which starts
+ * with "http" and so satisfied the old guard -- every challenge and recruitment
+ * link a player shared was `https://localhost/?c=...`, dead on arrival for the
+ * recipient and unable to match the App Links filter. VITE_SHARE_ORIGIN was
+ * declared in vite-env.d.ts but never read anywhere; it is read here now.
+ */
+const CONFIGURED_SHARE_ORIGIN = (import.meta.env.VITE_SHARE_ORIGIN ?? '').replace(/\/+$/, '');
+
+export const SHARE_ORIGIN = CONFIGURED_SHARE_ORIGIN
+  ? CONFIGURED_SHARE_ORIGIN
+  : isNative()
+  ? 'https://wreact.app'
+  : typeof window !== 'undefined' && /^https?:$/.test(window.location.protocol)
+  ? window.location.origin
+  : 'https://wreact.app';
 
 /* -------------------------------------------------------------------------- */
 /* Challenge links                                                            */

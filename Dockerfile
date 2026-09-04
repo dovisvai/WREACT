@@ -42,7 +42,13 @@ ENV NODE_ENV=production
 COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev && npm cache clean --force
 
+# dist/ is the web client; build/ is the server bundle. Both are needed: the
+# server serves the client. They are separate directories so that `cap sync`,
+# which copies webDir wholesale into the app, cannot package the server -- it
+# previously shipped server.cjs and its sourcemap, and therefore the full
+# server source, inside the APK.
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/build ./build
 
 # Never run as root.
 USER node
@@ -55,4 +61,4 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["node", "dist/server.cjs"]
+CMD ["node", "build/server.cjs"]
