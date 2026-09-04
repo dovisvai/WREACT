@@ -7,7 +7,11 @@ import {
   PlayerContribution,
 } from '../types';
 import { playSignalSound, playClickSound, playErrorSound, playFanfareSound } from '../utils/audio';
-import { MAX_VALID_MS, MIN_VALID_MS, isPlausibleReaction } from '../utils/standings';
+import {
+  MIN_VALID_MS,
+  isPlausibleForMode,
+  maxValidForMode,
+} from '../utils/standings';
 
 /** How long after a round starts a tap is treated as the tail of a double-tap. */
 const DOUBLE_TAP_GRACE_MS = 250;
@@ -112,7 +116,7 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
     // than trusting whatever is in storage.
     if (!playMode) return;
     const saved = Number.parseInt(localStorage.getItem(`pb_${playMode}`) ?? '', 10);
-    if (isPlausibleReaction(saved)) {
+    if (isPlausibleForMode(saved, playMode)) {
       setPersonalBest(saved);
     } else {
       if (Number.isFinite(saved)) localStorage.removeItem(`pb_${playMode}`);
@@ -131,8 +135,51 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
     []
   );
 
+  /**
+   * The invite this round was played against.
+   *
+   * recordResult calls onScoreSubmitted and then onChallengeSettled inside one
+   * discrete pointer event, so React batched the parent's setChallenge(null)
+   * into the same commit that set RESULT -- the result screen always received
+   * challenge={null} and the head-to-head panel, the entire payoff of accepting
+   * a challenge, could never render. Snapshotting it here survives the clear.
+   */
+  const [settledChallenge, setSettledChallenge] = useState<ChallengeInvite | null>(null);
+
   /** When the current wait began, for the double-tap guard above. */
   const waitStartedAtRef = useRef(0);
+
+  /**
+   * False between entering SIGNAL and the stimulus actually being on screen.
+   *
+   * A tap in that window is not a reaction to anything, so it is ignored rather
+   * than timed against a clock that has not started.
+   */
+  const signalPaintedRef = useRef(false);
+
+  /**
+   * Start the clock when the stimulus is visible, not when we ask React to
+   * render it.
+   *
+   * setState inside a timeout commits in a later scheduler task and paints at
+   * the following vsync, so stamping performance.now() next to the setState
+   * call started timing one frame or more before any green pixels existed --
+   * 16-35ms on this class of device, biasing every recorded time high, and
+   * consistently making slower phones look slower still. Two rAFs put us after
+   * the commit's paint: the first fires before it, the second after.
+   *
+   * This is the mirror of the pointerdown-not-click rule the tap side already
+   * follows; the start of the measurement deserves the same care as the end.
+   */
+  const startClockAfterPaint = useCallback(() => {
+    signalPaintedRef.current = false;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        startTimeRef.current = performance.now();
+        signalPaintedRef.current = true;
+      });
+    });
+  }, []);
 
   const triggerSignal = useCallback(() => {
     if (playMode === 'PRECISION_TARGET') {
@@ -140,13 +187,14 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
     }
 
     setTestState('SIGNAL');
-    startTimeRef.current = performance.now();
+    startClockAfterPaint();
     if (audioEnabled) playSignalSound();
     haptic.signal();
-  }, [playMode, audioEnabled]);
+  }, [playMode, audioEnabled, startClockAfterPaint]);
 
   const startTest = useCallback(() => {
     waitStartedAtRef.current = Date.now();
+    setSettledChallenge(null);
 
     // Today's event has not arrived yet. Starting here would silently play the
     // wrong discipline and record it as a ranked Classic run.
@@ -160,7 +208,7 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
       setPatternSequence(Array.from({ length: 4 }, () => Math.floor(Math.random() * 4)));
       setPatternIndex(0);
       setTestState('SIGNAL');
-      startTimeRef.current = performance.now();
+      startClockAfterPaint();
       return;
     }
 
@@ -172,7 +220,7 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
       }
       setStroop({ text, ink });
       setTestState('SIGNAL');
-      startTimeRef.current = performance.now();
+      startClockAfterPaint();
       return;
     }
 
@@ -189,7 +237,7 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
     }
 
     timerRef.current = setTimeout(triggerSignal, 2200 + Math.random() * 2500);
-  }, [playMode, audioEnabled, triggerSignal]);
+  }, [playMode, audioEnabled, triggerSignal, startClockAfterPaint]);
 
   const recordResult = useCallback(
     (elapsed: number) => {
@@ -210,7 +258,10 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
 
       // A time this long is inattention, not a reaction. Show it, explain it,
       // and keep it out of the player's record and their national average.
-      if (ms > MAX_VALID_MS) {
+      // The ceiling is per-mode: a four-tap sequence is legitimately slower
+      // than a single reaction, and judging it by the same number rejected
+      // successful runs and broke the streak.
+      if (playMode && ms > maxValidForMode(playMode)) {
         setTestState('TOO_SLOW');
         if (audioEnabled) playErrorSound();
         haptic.error();
@@ -238,7 +289,10 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
       }
 
       onScoreSubmitted(ms, playMode, isDailyEntry);
-      if (challenge) onChallengeSettled();
+      if (challenge) {
+        setSettledChallenge(challenge);
+        onChallengeSettled();
+      }
     },
     [
       playMode,
@@ -279,6 +333,9 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
       }
 
       if (testState === 'SIGNAL') {
+        // The stimulus is not on screen yet, so this cannot be a reaction to
+        // it. Timing it would produce a near-zero or negative figure.
+        if (!signalPaintedRef.current) return;
         recordResult(performance.now() - startTimeRef.current);
       }
     },
@@ -519,7 +576,8 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
               <span className="ml-1 text-xl text-ink-faint">s</span>
             </div>
             <p className="mt-3 text-xs leading-relaxed text-ink-faint">
-              Times over {MAX_VALID_MS / 1000}s are treated as inattention rather than
+              Times over {playMode ? maxValidForMode(playMode) / 1000 : 2}s are treated as
+              inattention rather than
               reaction, so this one stays out of your record and your national average.
             </p>
             <Button variant="signal" full className="mt-5" onClick={startTest}>
@@ -537,7 +595,7 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
             personalBest={personalBest}
             contribution={contribution}
             standings={standings}
-            challenge={challenge}
+            challenge={settledChallenge}
             onRetry={startTest}
             onShare={() => openShareModal(reactionTime, mode)}
           />

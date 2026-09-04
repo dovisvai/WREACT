@@ -8,6 +8,7 @@ import {
   computeStandings,
   snapshotRanks,
   isPlausibleReaction,
+  isPlausibleForMode,
   MIN_VALID_MS,
   MAX_VALID_MS,
 } from './src/utils/standings.js';
@@ -721,8 +722,11 @@ wss.on('connection', (ws, req) => {
         // Anti-cheat: only physiologically plausible reaction times are
         // recorded. Anything outside the window would corrupt a national mean.
         const submittedCountry = sanitizeCountry(country);
+        const submittedMode = sanitizeMode(mode) ?? 'CLASSIC';
 
-        if (isPlausibleReaction(scoreMs) && submittedCountry) {
+        // Per-mode: CLASSIC keeps the 80-2000ms window the standings rely on,
+        // while the multi-action practice modes are judged by their own.
+        if (isPlausibleForMode(scoreMs, submittedMode) && submittedCountry) {
           const sanitizedUsername = String(username || 'Anonymous').slice(0, 30).trim();
           const sanitizedCountry = submittedCountry;
 
@@ -732,7 +736,7 @@ wss.on('connection', (ws, req) => {
             username: sanitizedUsername,
             country: sanitizedCountry,
             scoreMs: Math.round(scoreMs),
-            mode: sanitizeMode(mode) ?? 'CLASSIC',
+            mode: submittedMode,
             timestamp: Date.now(),
             device: sanitizeDevice(device),
             isDaily: !!isDaily
@@ -1074,7 +1078,8 @@ app.post('/api/score', async (req, res) => {
   const userId = verified.uid;
   const { username, country, scoreMs, mode, device, isDaily } = req.body;
 
-  if (!isPlausibleReaction(scoreMs)) {
+  const restMode = sanitizeMode(mode) ?? 'CLASSIC';
+  if (!isPlausibleForMode(scoreMs, restMode)) {
     res.status(400).json({
       error: `Reaction times must be between ${MIN_VALID_MS}ms and ${MAX_VALID_MS}ms`
     });
@@ -1096,7 +1101,7 @@ app.post('/api/score', async (req, res) => {
     username: String(username || 'Anonymous').slice(0, 30).trim(),
     country: restCountry,
     scoreMs: Math.round(scoreMs),
-    mode: sanitizeMode(mode) ?? 'CLASSIC',
+    mode: restMode,
     timestamp: Date.now(),
     device: sanitizeDevice(device),
     isDaily: !!isDaily

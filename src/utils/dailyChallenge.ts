@@ -91,9 +91,19 @@ function dayIndex(now: number): number {
   return Math.floor(now / DAY_MS);
 }
 
-/** Which real mode is today's event, worldwide. */
+/**
+ * Which real mode is today's event, worldwide.
+ *
+ * The rotation has as many entries as the week has days, so indexing it by the
+ * day number alone pinned every discipline to a weekday for ever -- Monday was
+ * always Pattern Sequence. Precessing by the week number keeps the schedule
+ * deterministic and identical worldwide while letting each mode fall on every
+ * day of the week over time.
+ */
 export function dailyModeFor(now: number = Date.now()): GameMode {
-  return DAILY_ROTATION[dayIndex(now) % DAILY_ROTATION.length];
+  const day = dayIndex(now);
+  const week = Math.floor(day / 7);
+  return DAILY_ROTATION[(day + week) % DAILY_ROTATION.length];
 }
 
 /**

@@ -6,6 +6,7 @@ import {
   where,
   orderBy,
   limit,
+  startAfter,
   getDocs,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
@@ -75,35 +76,70 @@ function toScoreRecord(id: string, data: FirestoreScoreDoc): ScoreRecord {
   };
 }
 
+const PAGE_SIZE = 2000;
+
 /**
  * Load every score posted during a matchday.
  *
- * Filtered by `createdAt` so the query needs only a single-field index, which
- * Firestore provisions automatically — a composite index would be one more
- * thing to deploy before the table works.
+ * Paged rather than capped. A single `limit(5000)` on a descending query takes
+ * the newest 5000 of the week, and this result *replaces* the in-memory pool on
+ * every refresh -- so once a worldwide week exceeds that (hours, at launch
+ * scale) the standings were computed from a sliding window instead of the week.
+ * Countries whose athletes scored early progressively lost members, fell back
+ * under MIN_ATHLETES_TO_QUALIFY, and dropped silently out of the table. Nothing
+ * distinguished that from a healthy read.
+ *
+ * The hard ceiling remains, because an unbounded read is its own failure mode,
+ * but hitting it is now loud rather than invisible.
  */
 export async function fetchMatchdayScores(
   matchday: Matchday,
-  max = 5000
+  max = 60000
 ): Promise<ScoreRecord[]> {
-  try {
-    const snapshot = await getDocs(
-      query(
-        collection(db, SCORES_COLLECTION),
-        where('timestamp', '>=', new Date(matchday.startsAt)),
-        where('timestamp', '<', new Date(matchday.endsAt)),
-        orderBy('timestamp', 'desc'),
-        limit(max)
-      )
-    );
+  const out: ScoreRecord[] = [];
 
-    return snapshot.docs.map((doc) => toScoreRecord(doc.id, doc.data() as FirestoreScoreDoc));
+  try {
+    const base = [
+      where('timestamp', '>=', new Date(matchday.startsAt)),
+      where('timestamp', '<', new Date(matchday.endsAt)),
+      orderBy('timestamp', 'desc'),
+    ] as const;
+
+    let cursor: unknown = null;
+
+    while (out.length < max) {
+      const page = await getDocs(
+        cursor
+          ? query(collection(db, SCORES_COLLECTION), ...base, startAfter(cursor), limit(PAGE_SIZE))
+          : query(collection(db, SCORES_COLLECTION), ...base, limit(PAGE_SIZE))
+      );
+      if (page.empty) break;
+
+      for (const doc of page.docs) {
+        out.push(toScoreRecord(doc.id, doc.data() as FirestoreScoreDoc));
+      }
+
+      if (page.size < PAGE_SIZE) break;
+      cursor = page.docs[page.docs.length - 1];
+    }
+
+    if (out.length >= max) {
+      console.warn(
+        `[ScorePool] Matchday read hit the ${max} ceiling. The standings are ` +
+          'computed from a partial week from here on -- raise the cap or move ' +
+          'aggregation server-side.'
+      );
+    }
+
+    return out;
   } catch (err) {
     console.warn(
       '[ScorePool] Firestore read failed; serving from memory only:',
       (err as Error)?.message ?? err
     );
-    return [];
+    // Partial pages are still better than nothing, and the caller keeps the
+    // in-memory pool when this comes back empty.
+    return out;
   }
 }
 

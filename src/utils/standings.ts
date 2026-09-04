@@ -1,4 +1,4 @@
-import { ScoreRecord, CountryStanding, PlayerContribution } from '../types';
+import { ScoreRecord, CountryStanding, PlayerContribution, GameMode } from '../types';
 import { COUNTRIES, getCountryFlag, getCountryName } from './countries';
 import { Matchday, isRankedMode, isWithinMatchday } from './matchday';
 import { isRestrictedCountry } from './restrictedCountries';
@@ -23,6 +23,35 @@ export const MAX_VALID_MS = 2000;
 
 export function isPlausibleReaction(ms: number): boolean {
   return Number.isFinite(ms) && ms >= MIN_VALID_MS && ms <= MAX_VALID_MS;
+}
+
+/**
+ * The upper bound for a mode, which is not the same for all of them.
+ *
+ * MAX_VALID_MS is calibrated for a single reaction, and applying it everywhere
+ * rejected successful runs: Pattern Sequence times four consecutive find-and-tap
+ * actions against a 1500ms target, so an ordinary good run lands near 1700ms and
+ * a merely decent one exceeds 2000ms. Those runs were shown as "not recorded --
+ * treated as inattention" after the player did everything right, and because
+ * recordResult returns before submitting, the daily streak silently broke.
+ *
+ * CLASSIC is unchanged, so the standings -- which count CLASSIC alone -- keep
+ * exactly the bounds they had.
+ */
+export function maxValidForMode(mode: GameMode): number {
+  switch (mode) {
+    case 'PATTERN_SEQUENCE':
+      return 8000; // four sequential actions
+    case 'REVERSE_COLOR':
+      return 4000; // read the word, identify the ink, choose
+    default:
+      return MAX_VALID_MS;
+  }
+}
+
+/** Mode-aware plausibility. Use wherever the discipline is known. */
+export function isPlausibleForMode(ms: number, mode: GameMode): boolean {
+  return Number.isFinite(ms) && ms >= MIN_VALID_MS && ms <= maxValidForMode(mode);
 }
 
 /** Stable per-player key. Prefers a real account id, falls back to name+country. */

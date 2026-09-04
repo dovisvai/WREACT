@@ -33,10 +33,15 @@ export const DailyChallengeView: React.FC<DailyChallengeViewProps> = ({
     );
   }
 
+  // `dailyInfo.date` is a UTC day key ("2026-09-04"), which Date parses as UTC
+  // midnight and toLocaleDateString then renders in local time -- so everyone
+  // west of UTC saw yesterday's date on today's event. The whole day and streak
+  // system is UTC; this was the one place the boundary leaked.
   const formattedDate = new Date(dailyInfo.date).toLocaleDateString(undefined, {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
+    timeZone: 'UTC',
   });
 
   return (

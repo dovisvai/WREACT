@@ -24,7 +24,11 @@ import { ChallengeBanner } from './components/ChallengeBanner';
 import { Segmented } from './components/ui/Primitives';
 import { setGlobalAudioMuted } from './utils/audio';
 import { getCountryName } from './utils/countries';
-import { computeContribution, isPlausibleReaction } from './utils/standings';
+import {
+  computeContribution,
+  isPlausibleReaction,
+  isPlausibleForMode,
+} from './utils/standings';
 import { isRestrictedCountry } from './utils/restrictedCountries';
 import { isRankedMode } from './utils/matchday';
 import { advanceStreak, hasPlayedToday } from './utils/streak';
@@ -222,7 +226,10 @@ export default function App() {
     (scoreMs: number, mode: GameMode, isDaily = false) => {
       // A 45-second "reaction" is inattention, not a result. It must never
       // become a personal best, and must never reach a national average.
-      if (!isPlausibleReaction(scoreMs)) return;
+      // Per-mode, because this guard also gates the daily streak: judging a
+      // four-tap sequence by the single-reaction ceiling silently dropped
+      // successful runs and reset the streak the next day.
+      if (!isPlausibleForMode(scoreMs, mode)) return;
 
       const previousBest = userProfile.bestScore > 0 ? userProfile.bestScore : null;
 
@@ -299,9 +306,20 @@ export default function App() {
    * Campaigns target on these, so a stale rank means the wrong player gets the
    * "you are about to be overtaken" message — worse than sending nothing.
    */
+  const pushTags = useMemo(
+    () => buildPushTags(userProfile, userStanding, clock),
+    [userProfile, userStanding, clock]
+  );
+  // Serialised, so the effect fires on a change of value rather than of object
+  // identity. `clock` is replaced every 15s and `userStanding` on every
+  // standings broadcast, so the previous dependencies pushed seven unchanged
+  // tag values across the native bridge at least four times a minute for the
+  // whole session -- on the battery-limited devices this app is built for.
+  const pushTagsKey = JSON.stringify(pushTags);
+
   useEffect(() => {
-    syncPushTags(buildPushTags(userProfile, userStanding, clock));
-  }, [userProfile, userStanding, clock]);
+    syncPushTags(JSON.parse(pushTagsKey));
+  }, [pushTagsKey]);
 
   const goPlay = useCallback(() => setActiveTab('PLAY'), []);
 
