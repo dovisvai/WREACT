@@ -60,14 +60,15 @@ android {
             if (hasReleaseKeystore) {
                 signingConfig signingConfigs.release
             }
-            // R8 is deliberately off for the first release. Nearly all the
-            // logic here is JavaScript, so the size win is small, while the
-            // reflection-heavy native stack (Capacitor plugin lookup by class
-            // name, the OneSignal Cordova bridge) is where obfuscation breaks
-            // in ways that only show up on a release build. Turn it on for a
-            // later version with its own smoke test.
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // R8 shrinks and obfuscates the Java shell and strips logging.
+            // The reflection-heavy parts -- Capacitor's plugin lookup by class
+            // name, the OneSignal Cordova bridge, RevenueCat's deserialisation
+            // -- are covered by explicit keep rules in proguard-rules.pro,
+            // because they fail at runtime on a release build rather than at
+            // compile time, which is the worst place to find out.
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
 }

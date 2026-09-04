@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Network posture for WREACT.
+
+  MASVS-NETWORK-1: all traffic is TLS. cleartextTrafficPermitted="false" is the
+  platform default at targetSdk 36, but declaring it explicitly means a future
+  library that ships its own manifest cannot quietly re-enable it, and it makes
+  the intent auditable rather than implied.
+
+  On certificate pinning, deliberately omitted, with reasoning rather than a
+  shrug: the app talks to Railway (wreact-production.up.railway.app) and Google
+  (Firebase auth, Firestore, FCM). Both rotate leaf and intermediate
+  certificates on their own schedule and neither publishes a pin set, so a
+  hardcoded pin is a scheduled outage — when it expires the app cannot reach its
+  own backend and no server-side change can fix an already-installed build.
+
+  It would also buy very little here. Pinning defends confidentiality and
+  integrity of the channel; this app's threat is a player forging their own
+  scores, and that player owns the device, so they can read the traffic whatever
+  we pin. The defence against forged scores is server-side validation and
+  attestation of the caller, not making the wire harder to read.
+
+  If pinning is wanted later, pin to the CA's SPKI rather than the leaf, always
+  ship at least one backup pin, and set an expiration so a missed rotation
+  degrades to unpinned instead of bricking the app.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <!-- System CAs only. User-installed CAs are deliberately not
+                 trusted, so a proxy CA added on a rooted device or emulator
+                 (Burp, mitmproxy, Charles) cannot transparently intercept
+                 traffic from a release build. This is the pinning-adjacent
+                 control that costs nothing to maintain. -->
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- Debug builds keep user CAs so the traffic stays inspectable during
+         development. This block is ignored in a release build. -->
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </debug-overrides>
+</network-security-config>

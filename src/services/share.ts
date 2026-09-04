@@ -1,6 +1,7 @@
 import { Share } from '@capacitor/share';
 import { ChallengeInvite, GameMode } from '../types';
-import { getCountryFlag, getCountryName } from '../utils/countries';
+import { getCountryFlag, getCountryName, ALL_COUNTRIES } from '../utils/countries';
+import { isRestrictedCountry } from '../utils/restrictedCountries';
 import { isNative } from './native';
 
 /**
@@ -68,6 +69,18 @@ export function buildChallengeLink(invite: ChallengeInvite): string {
 }
 
 /** Read an invite out of the current URL, if one is present. */
+const KNOWN_CODES: ReadonlySet<string> = new Set(ALL_COUNTRIES.map((c) => c.code));
+
+/** Disciplines a challenge link may nominate. Closed set, not a cast. */
+const CHALLENGE_MODES: ReadonlySet<string> = new Set<GameMode>([
+  'CLASSIC',
+  'FALSE_ALARM',
+  'PATTERN_SEQUENCE',
+  'PRECISION_TARGET',
+  'REVERSE_COLOR',
+  'DAILY_CHALLENGE',
+]);
+
 export function parseChallengeFromUrl(
   url: string = typeof window !== 'undefined' ? window.location.href : ''
 ): ChallengeInvite | null {
@@ -77,15 +90,27 @@ export function parseChallengeFromUrl(
     if (!token) return null;
 
     const raw = JSON.parse(fromBase64Url(token));
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+
     const scoreMs = Number(raw.s);
     if (!Number.isFinite(scoreMs) || scoreMs < 80 || scoreMs > 2000) return null;
 
+    // Everything below arrives from a link a stranger sent. It is displayed, so
+    // the values are validated against closed sets rather than merely truncated
+    // -- `as GameMode` on an attacker-supplied string was a cast, not a check,
+    // and a three-character country slice let arbitrary codes through the same
+    // way the server's did before it was tightened.
+    const country = String(raw.c ?? '').trim().toUpperCase();
+    const mode = String(raw.m ?? '');
+
     return {
-      username: String(raw.u || 'A rival').slice(0, 30),
-      country: String(raw.c || 'US').slice(0, 3).toUpperCase(),
-      avatar: String(raw.a || '⚡').slice(0, 8),
+      username: String(raw.u ?? '').slice(0, 30).trim() || 'A rival',
+      // Known ISO code *and* not a restricted market. Membership alone let a
+      // sanctioned nation through, because those are real codes.
+      country: KNOWN_CODES.has(country) && !isRestrictedCountry(country) ? country : 'US',
+      avatar: String(raw.a ?? '').slice(0, 8) || '⚡',
       scoreMs: Math.round(scoreMs),
-      mode: (raw.m || 'CLASSIC') as GameMode,
+      mode: CHALLENGE_MODES.has(mode) ? (mode as GameMode) : 'CLASSIC',
     };
   } catch {
     return null;
