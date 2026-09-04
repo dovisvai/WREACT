@@ -74,7 +74,8 @@ service cloud.firestore {
         // spike, or moving on once it is ranked. The whole table is one number
         // per country, so who is allowed to be in that number has to be stable.
         // Changing nation now means deleting the account, which the app offers.
-        && (!resource.data.keys().hasAny(['country'])
+        && (resource == null
+             || !('country' in resource.data)
              || request.resource.data.country == resource.data.country)
         // Matches the same floor the scores collection enforces, so a profile
         // cannot advertise a best time the scores table would have rejected.
@@ -103,6 +104,15 @@ service cloud.firestore {
         && isKnownMode(request.resource.data.mode)
         && isNonEmptyString(request.resource.data.username, 30)
         && isAcceptedCountry(request.resource.data.country)
+        // The matchday a score belongs to is decided by its time, so the time
+        // cannot be the submitter's to choose. `createdAt` is a client string
+        // kept for display; `timestamp` is pinned to the server clock and is
+        // what the standings read. Without this, a score could be dated into
+        // next week -- or ten weeks out -- and win those tables before they
+        // opened.
+        && request.resource.data.timestamp == request.time
+        && (!('createdAt' in request.resource.data)
+             || isNonEmptyString(request.resource.data.createdAt, 40))
         // A score must be posted for the athlete's own nation. Locking the
         // profile alone is not enough: a raw write could still claim any
         // country. Costs one document read per score, which is the right

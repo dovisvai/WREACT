@@ -277,6 +277,7 @@ interface FirestoreScoreDoc {
   scoreMs?: number;
   mode?: string;
   createdAt?: string;
+  timestamp?: { toMillis?: () => number };
 }
 
 function toScoreRecord(id: string, data: FirestoreScoreDoc): ScoreRecord {
@@ -287,7 +288,10 @@ function toScoreRecord(id: string, data: FirestoreScoreDoc): ScoreRecord {
     country: (data.country || 'US').toUpperCase(),
     scoreMs: Number(data.scoreMs) || 0,
     mode: (data.mode || 'CLASSIC') as ScoreRecord['mode'],
-    timestamp: data.createdAt ? Date.parse(data.createdAt) : Date.now(),
+    // Server write time where present; the client string is a legacy fallback.
+    timestamp:
+      data.timestamp?.toMillis?.() ??
+      (data.createdAt ? Date.parse(data.createdAt) : Date.now()),
     // device is deliberately omitted: Firestore does not store it, and
     // asserting a platform we do not know would be inventing data.
   };

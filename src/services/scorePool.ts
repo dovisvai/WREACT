@@ -41,6 +41,24 @@ interface FirestoreScoreDoc {
   scoreMs?: number;
   mode?: string;
   createdAt?: string;
+  /** Server-set write time. Firestore Timestamp; authoritative for matchdays. */
+  timestamp?: { toMillis?: () => number };
+}
+
+/**
+ * When a score happened, according to the server rather than the submitter.
+ *
+ * `createdAt` is a string the client writes and can set to anything, and it
+ * used to decide which matchday a score counted toward -- so a score could be
+ * dated into next week and win a table before it opened. `timestamp` is pinned
+ * to `request.time` by firestore.rules. The string is only a display fallback
+ * for rows written before that rule existed.
+ */
+function writtenAt(data: FirestoreScoreDoc): number {
+  const server = data.timestamp?.toMillis?.();
+  if (typeof server === 'number' && Number.isFinite(server)) return server;
+  const parsed = data.createdAt ? Date.parse(data.createdAt) : NaN;
+  return Number.isFinite(parsed) ? parsed : Date.now();
 }
 
 function toScoreRecord(id: string, data: FirestoreScoreDoc): ScoreRecord {
@@ -51,7 +69,7 @@ function toScoreRecord(id: string, data: FirestoreScoreDoc): ScoreRecord {
     country: (data.country || 'US').toUpperCase(),
     scoreMs: Number(data.scoreMs) || 0,
     mode: (data.mode || 'CLASSIC') as ScoreRecord['mode'],
-    timestamp: data.createdAt ? Date.parse(data.createdAt) : Date.now(),
+    timestamp: writtenAt(data),
     // device is deliberately omitted: Firestore does not store it, and
     // asserting a platform we do not know would be inventing data.
   };
@@ -72,9 +90,9 @@ export async function fetchMatchdayScores(
     const snapshot = await getDocs(
       query(
         collection(db, SCORES_COLLECTION),
-        where('createdAt', '>=', new Date(matchday.startsAt).toISOString()),
-        where('createdAt', '<', new Date(matchday.endsAt).toISOString()),
-        orderBy('createdAt', 'desc'),
+        where('timestamp', '>=', new Date(matchday.startsAt)),
+        where('timestamp', '<', new Date(matchday.endsAt)),
+        orderBy('timestamp', 'desc'),
         limit(max)
       )
     );
