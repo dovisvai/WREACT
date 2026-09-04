@@ -425,7 +425,6 @@ export default function App() {
             onUpdateProfile={saveUserProfile}
             openAuthModal={() => setIsAuthModalOpen(true)}
             openMonetizationModal={() => setIsMonetizationModalOpen(true)}
-            openOnboarding={() => setIsOnboardingOpen(true)}
             onDeleteAccount={handleDeleteAccount}
           />
         )}

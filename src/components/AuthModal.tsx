@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { UserProfile } from '../types';
 import { X, CheckCircle2, ShieldCheck, Lock, Sparkles, UserCheck } from 'lucide-react';
 import { getCountryFlag } from '../utils/countries';
-import { AppleMark } from './ui/Primitives';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -25,10 +24,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onLoginSuccess,
   onSignOut,
 }) => {
-  const [activeScreen, setActiveScreen] = useState<'CHOICE' | 'GOOGLE' | 'APPLE' | 'SUCCESS'>('CHOICE');
+  const [activeScreen, setActiveScreen] = useState<'CHOICE' | 'GOOGLE' | 'SUCCESS'>('CHOICE');
   const [loading, setLoading] = useState(false);
   const [googleAccount, setGoogleAccount] = useState('alex.reflex@gmail.com');
-  const [usePrivateRelay, setUsePrivateRelay] = useState(true);
   const [customName, setCustomName] = useState(userProfile.username || 'ProReflexAthlete');
 
   if (!isOpen) return null;
@@ -43,21 +41,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         authProvider: 'google',
         verifiedAthlete: true,
         photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
-      });
-      setActiveScreen('SUCCESS');
-    }, 1200);
-  };
-
-  const handleAppleAuth = () => {
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      const email = usePrivateRelay ? 'k9x2m4p8z@privaterelay.appleid.com' : 'athlete@icloud.com';
-      onLoginSuccess({
-        username: customName || 'SwiftReflex_Pro',
-        email,
-        authProvider: 'apple',
-        verifiedAthlete: true,
       });
       setActiveScreen('SUCCESS');
     }, 1200);
@@ -120,10 +103,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       Signed in with Google Account
                     </span>
                   ) : (
-                    <span className="flex items-center gap-1.5 font-medium text-ink">
-                      <AppleMark className="h-4" />
-                      Signed in with Apple ID
-                    </span>
+                    <span className="font-medium text-ink">Signed in</span>
                   )}
                 </div>
               </div>
@@ -175,17 +155,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <span>Continue with Google</span>
                 </button>
 
-                {/* Sign in with Apple.
-                    Apple's guidelines permit black, white, or white with a black
-                    outline — a grey border is not one of them, and the mark sits
-                    on true black rather than the app's near-black. */}
-                <button
-                  onClick={() => setActiveScreen('APPLE')}
-                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-black px-4 py-3.5 text-sm font-semibold text-white transition-all hover:bg-[#1a1a1a] active:scale-[0.98]"
-                >
-                  <AppleMark className="h-[18px]" />
-                  <span>Sign in with Apple</span>
-                </button>
               </div>
 
               {/* Guest option */}
@@ -260,77 +229,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <>
                     <UserCheck className="w-4 h-4" />
                     <span>Authorize Google Sign-In</span>
-                  </>
-                )}
-              </button>
-            </div>
-          ) : activeScreen === 'APPLE' ? (
-            /* APPLE ID OAUTH FLOW SIMULATION */
-            <div className="space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-pitch-600">
-                <div className="flex items-center gap-2">
-                  <AppleMark className="h-[18px] text-ink" />
-                  <span className="font-bold text-sm text-ink">Apple ID Authentication</span>
-                </div>
-                <button
-                  onClick={() => setActiveScreen('CHOICE')}
-                  className="text-xs text-ink-faint hover:text-ink"
-                >
-                  Back
-                </button>
-              </div>
-
-              <div className="bg-pitch-950 border border-pitch-600 rounded-2xl p-4 space-y-3">
-                <label className="block text-[11px] font-mono text-ink-faint uppercase">Gamer Tag Name</label>
-                <input
-                  type="text"
-                  value={customName}
-                  onChange={(e) => setCustomName(e.target.value)}
-                  className="w-full bg-pitch-850 border border-pitch-600 rounded-xl px-3 py-2 text-xs text-ink focus:outline-none focus:border-white"
-                  placeholder="SwiftReflex_Pro"
-                />
-
-                <div className="pt-2 border-t border-pitch-600 space-y-2">
-                  <span className="block text-[11px] font-mono text-ink-faint uppercase">Apple Privacy Settings</span>
-                  
-                  <label className="flex items-center gap-2 text-xs text-ink-muted cursor-pointer">
-                    <input
-                      type="radio"
-                      name="appleEmail"
-                      checked={usePrivateRelay}
-                      onChange={() => setUsePrivateRelay(true)}
-                      className="accent-white"
-                    />
-                    <span>Hide My Email (Private Relay)</span>
-                  </label>
-
-                  <label className="flex items-center gap-2 text-xs text-ink-muted cursor-pointer">
-                    <input
-                      type="radio"
-                      name="appleEmail"
-                      checked={!usePrivateRelay}
-                      onChange={() => setUsePrivateRelay(false)}
-                      className="accent-white"
-                    />
-                    <span>Share My Email (athlete@icloud.com)</span>
-                  </label>
-                </div>
-              </div>
-
-              <button
-                onClick={handleAppleAuth}
-                disabled={loading}
-                className="w-full py-3 bg-white hover:bg-ink disabled:bg-ink-faint text-pitch-950 font-bold rounded-2xl text-xs transition-all flex items-center justify-center gap-2 shadow-lg"
-              >
-                {loading ? (
-                  <>
-                    <span className="w-4 h-4 border-2 border-pitch-950/20 border-t-pitch-950 rounded-full animate-spin" />
-                    <span>Verifying Face ID / Touch ID...</span>
-                  </>
-                ) : (
-                  <>
-                    <ShieldCheck className="w-4 h-4" />
-                    <span>Confirm with Apple ID</span>
                   </>
                 )}
               </button>

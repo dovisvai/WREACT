@@ -32,7 +32,6 @@ interface ProfileViewProps {
   onUpdateProfile: (updated: Partial<UserProfile>) => void;
   openAuthModal: () => void;
   openMonetizationModal: () => void;
-  openOnboarding?: () => void;
   onDeleteAccount?: () => void;
 }
 
@@ -43,7 +42,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onUpdateProfile,
   openAuthModal,
   openMonetizationModal,
-  openOnboarding,
   onDeleteAccount,
 }) => {
   const [tab, setTab] = useState<'STATS' | 'BADGES' | 'SOUND'>('STATS');
@@ -377,9 +375,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               <RowButton label="WREACT Pro" hint="Unlimited duels, full telemetry" onClick={openMonetizationModal} />
             )}
             {profile.isLoggedIn && <RowButton label="Manage sign-in" onClick={openAuthModal} />}
-            {openOnboarding && (
-              <RowButton label="Change nation or name" onClick={openOnboarding} />
-            )}
             <RowButton
               label="Privacy policy"
               icon={<FileText className="h-3.5 w-3.5" />}
