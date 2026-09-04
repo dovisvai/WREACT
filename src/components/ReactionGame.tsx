@@ -1,10 +1,20 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { GameMode, DeviceOS } from '../types';
-import { playSignalSound, playClickSound, playErrorSound, playFanfareSound, triggerHaptic } from '../utils/audio';
-import { useHapticSound } from '../hooks/useHapticSound';
-import { getPercentileRating } from '../utils/countries';
-import { Zap, AlertTriangle, RefreshCw, Trophy, Share2, Target, Eye, Sparkles, CheckCircle2, RotateCcw } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  ChallengeInvite,
+  CountryStanding,
+  DeviceOS,
+  GameMode,
+  PlayerContribution,
+} from '../types';
+import { playSignalSound, playClickSound, playErrorSound, playFanfareSound } from '../utils/audio';
+import { MAX_VALID_MS, isPlausibleReaction } from '../utils/standings';
+import { MODE_LABELS } from '../utils/dailyChallenge';
+import { MODES } from './game/modes';
+import { haptic } from '../services/native';
+import { AlertTriangle, Eye, RefreshCw, RotateCcw, Target, Trophy, Zap } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { Button, Label, cx } from './ui/Primitives';
+import { IdleScreen, ResultScreen } from './game/ReactionScreens';
 
 interface ReactionGameProps {
   mode: GameMode;
@@ -14,523 +24,457 @@ interface ReactionGameProps {
   avatar: string;
   deviceOS: DeviceOS;
   audioEnabled: boolean;
-  onScoreSubmitted: (scoreMs: number, mode: GameMode) => void;
+  onScoreSubmitted: (scoreMs: number, mode: GameMode, isDaily: boolean) => void;
+  /** The real mode today's daily event nominates. */
+  dailyMode: GameMode | null;
+  dailyTargetMs: number | null;
   openShareModal: (scoreMs: number, mode: GameMode) => void;
+  contribution: PlayerContribution | null;
+  standings: CountryStanding[];
+  challenge: ChallengeInvite | null;
+  onChallengeSettled: () => void;
 }
 
-type TestState = 'IDLE' | 'WAITING' | 'TRAP_WARNING' | 'SIGNAL' | 'RESULT' | 'FALSE_START';
+type TestState = 'IDLE' | 'WAITING' | 'TRAP_WARNING' | 'SIGNAL' | 'RESULT' | 'FALSE_START' | 'TOO_SLOW';
+
+const STROOP_COLORS = ['RED', 'BLUE', 'GREEN', 'YELLOW'] as const;
+const STROOP_INK: Record<string, string> = {
+  RED: 'text-alert',
+  BLUE: 'text-sky-400',
+  GREEN: 'text-signal',
+  YELLOW: 'text-gold',
+};
+const STROOP_BUTTON: Record<string, string> = {
+  RED: 'bg-alert text-white',
+  BLUE: 'bg-sky-500 text-pitch-950',
+  GREEN: 'bg-signal text-pitch-950',
+  YELLOW: 'bg-gold text-pitch-950',
+};
 
 export const ReactionGame: React.FC<ReactionGameProps> = ({
   mode,
   setMode,
   username,
   country,
-  avatar,
-  deviceOS,
   audioEnabled,
   onScoreSubmitted,
+  dailyMode,
+  dailyTargetMs,
+  contribution,
   openShareModal,
+  standings,
+  challenge,
+  onChallengeSettled,
 }) => {
-  const { playPop, playSnap, playHeavy, playError } = useHapticSound({ enabled: audioEnabled });
-
   const [testState, setTestState] = useState<TestState>('IDLE');
   const [reactionTime, setReactionTime] = useState<number | null>(null);
-  const [personalBest, setPersonalBest] = useState<number | null>(() => {
-    const saved = localStorage.getItem(`pb_${mode}`);
-    return saved ? parseInt(saved, 10) : null;
-  });
+  const [personalBest, setPersonalBest] = useState<number | null>(null);
 
-  // Pattern sequence mode states
   const [patternSequence, setPatternSequence] = useState<number[]>([]);
-  const [currentPatternIndex, setCurrentPatternIndex] = useState<number>(0);
-  const [patternStartTime, setPatternStartTime] = useState<number>(0);
+  const [patternIndex, setPatternIndex] = useState(0);
+  const [targetPos, setTargetPos] = useState({ x: 50, y: 50 });
+  const [stroop, setStroop] = useState({ text: 'RED', ink: 'BLUE' });
 
-  // Precision target mode states
-  const [targetPos, setTargetPos] = useState<{ x: number; y: number }>({ x: 50, y: 50 });
+  /**
+   * Monotonic clock. `Date.now()` is wall-clock: it has millisecond
+   * granularity and can step sideways if the system clock adjusts mid-test,
+   * which in a reaction-time product is the difference between a real result
+   * and a wrong one.
+   */
+  const startTimeRef = useRef(0);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Reverse color mode states
-  const [reverseColorPrompt, setReverseColorPrompt] = useState<{ text: string; inkColor: string; correctColor: string }>({
-    text: 'RED',
-    inkColor: 'text-blue-500',
-    correctColor: 'BLUE',
-  });
+  /**
+   * The daily event is a wrapper, not a game. It nominates one of the real
+   * modes for the day; everything below plays that mode and records under it,
+   * flagged as a daily entry.
+   */
+  const isDailyEntry = mode === 'DAILY_CHALLENGE';
+  const playMode: GameMode = isDailyEntry ? dailyMode ?? 'CLASSIC' : mode;
 
-  // Timing refs
-  const startTimeRef = useRef<number>(0);
-  const timerTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const activeMode = MODES.find((m) => m.id === playMode) ?? MODES[0];
 
   useEffect(() => {
-    const saved = localStorage.getItem(`pb_${mode}`);
-    setPersonalBest(saved ? parseInt(saved, 10) : null);
-    resetTest();
-  }, [mode]);
+    // Personal bests written before score validation existed can be nonsense
+    // (a forgotten tab produces a 45-second "reaction"). Discard on read rather
+    // than trusting whatever is in storage.
+    const saved = Number.parseInt(localStorage.getItem(`pb_${playMode}`) ?? '', 10);
+    if (isPlausibleReaction(saved)) {
+      setPersonalBest(saved);
+    } else {
+      if (Number.isFinite(saved)) localStorage.removeItem(`pb_${playMode}`);
+      setPersonalBest(null);
+    }
 
-  const resetTest = () => {
-    if (timerTimeoutRef.current) clearTimeout(timerTimeoutRef.current);
+    if (timerRef.current) clearTimeout(timerRef.current);
     setTestState('IDLE');
     setReactionTime(null);
-  };
+  }, [playMode]);
 
-  const startTest = () => {
-    if (audioEnabled) {
-      playClickSound();
-      playHeavy();
+  useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    },
+    []
+  );
+
+  const triggerSignal = useCallback(() => {
+    if (playMode === 'PRECISION_TARGET') {
+      setTargetPos({ x: 20 + Math.random() * 60, y: 20 + Math.random() * 60 });
     }
-    triggerHaptic(30);
 
-    if (mode === 'PATTERN_SEQUENCE') {
-      // Generate 4-step sequence
-      const seq = [
-        Math.floor(Math.random() * 4),
-        Math.floor(Math.random() * 4),
-        Math.floor(Math.random() * 4),
-        Math.floor(Math.random() * 4),
-      ];
-      setPatternSequence(seq);
-      setCurrentPatternIndex(0);
+    setTestState('SIGNAL');
+    startTimeRef.current = performance.now();
+    if (audioEnabled) playSignalSound();
+    haptic.signal();
+  }, [playMode, audioEnabled]);
+
+  const startTest = useCallback(() => {
+    if (audioEnabled) playClickSound();
+    haptic.medium();
+    setReactionTime(null);
+
+    if (playMode === 'PATTERN_SEQUENCE') {
+      setPatternSequence(Array.from({ length: 4 }, () => Math.floor(Math.random() * 4)));
+      setPatternIndex(0);
       setTestState('SIGNAL');
-      setPatternStartTime(Date.now());
+      startTimeRef.current = performance.now();
       return;
     }
 
-    if (mode === 'REVERSE_COLOR') {
-      const colors = ['RED', 'BLUE', 'GREEN', 'YELLOW'];
-      const text = colors[Math.floor(Math.random() * colors.length)];
-      let ink = colors[Math.floor(Math.random() * colors.length)];
+    if (playMode === 'REVERSE_COLOR') {
+      const text = STROOP_COLORS[Math.floor(Math.random() * STROOP_COLORS.length)];
+      let ink = text;
       while (ink === text) {
-        ink = colors[Math.floor(Math.random() * colors.length)];
+        ink = STROOP_COLORS[Math.floor(Math.random() * STROOP_COLORS.length)];
       }
-
-      const colorClassMap: Record<string, string> = {
-        RED: 'text-rose-500',
-        BLUE: 'text-cyan-400',
-        GREEN: 'text-emerald-400',
-        YELLOW: 'text-amber-400',
-      };
-
-      setReverseColorPrompt({
-        text,
-        inkColor: colorClassMap[ink],
-        correctColor: ink, // Instruction: "Tap the INK COLOR, ignore the word text!"
-      });
-
+      setStroop({ text, ink });
       setTestState('SIGNAL');
-      startTimeRef.current = Date.now();
+      startTimeRef.current = performance.now();
       return;
     }
 
     setTestState('WAITING');
 
-    // Random delay between 2000ms and 4500ms
-    const randomDelay = 2200 + Math.random() * 2500;
-
-    // False alarm logic
-    if (mode === 'FALSE_ALARM') {
-      // Chance of triggering a false alarm warning before real signal
-      if (Math.random() > 0.4) {
-        const falseAlarmDelay = 1200 + Math.random() * 1000;
-        timerTimeoutRef.current = setTimeout(() => {
-          setTestState('TRAP_WARNING');
-          if (audioEnabled) playErrorSound();
-
-          // After false alarm passes, resume to signal
-          timerTimeoutRef.current = setTimeout(() => {
-            triggerRealSignal();
-          }, 1400);
-        }, falseAlarmDelay);
-        return;
-      }
-    }
-
-    timerTimeoutRef.current = setTimeout(() => {
-      triggerRealSignal();
-    }, randomDelay);
-  };
-
-  const triggerRealSignal = () => {
-    if (mode === 'PRECISION_TARGET') {
-      // Random coordinates between 20% and 80%
-      const rx = 20 + Math.random() * 60;
-      const ry = 20 + Math.random() * 60;
-      setTargetPos({ x: rx, y: ry });
-    }
-
-    setTestState('SIGNAL');
-    startTimeRef.current = Date.now();
-    if (audioEnabled) playSignalSound();
-    triggerHaptic([40, 30, 40]);
-  };
-
-  const handleTap = (e?: React.MouseEvent | React.TouchEvent) => {
-    e?.stopPropagation();
-
-    if (testState === 'WAITING' || testState === 'TRAP_WARNING') {
-      // Early tap / jump start!
-      if (timerTimeoutRef.current) clearTimeout(timerTimeoutRef.current);
-      setTestState('FALSE_START');
-      if (audioEnabled) {
-        playErrorSound();
-        playError();
-      }
-      triggerHaptic([100, 50, 100]);
+    // A trap run may flash a decoy before the real signal.
+    if (playMode === 'FALSE_ALARM' && Math.random() > 0.4) {
+      timerRef.current = setTimeout(() => {
+        setTestState('TRAP_WARNING');
+        if (audioEnabled) playErrorSound();
+        timerRef.current = setTimeout(triggerSignal, 1400);
+      }, 1200 + Math.random() * 1000);
       return;
     }
 
-    if (testState === 'SIGNAL') {
-      const elapsed = Date.now() - startTimeRef.current;
-      setReactionTime(elapsed);
-      setTestState('RESULT');
+    timerRef.current = setTimeout(triggerSignal, 2200 + Math.random() * 2500);
+  }, [playMode, audioEnabled, triggerSignal]);
 
-      if (audioEnabled) {
-        playSignalSound();
-        playPop();
+  const recordResult = useCallback(
+    (elapsed: number) => {
+      const ms = Math.round(elapsed);
+      setReactionTime(ms);
+
+      // A time this long is inattention, not a reaction. Show it, explain it,
+      // and keep it out of the player's record and their national average.
+      if (ms > MAX_VALID_MS) {
+        setTestState('TOO_SLOW');
+        if (audioEnabled) playErrorSound();
+        haptic.error();
+        return;
       }
-      triggerHaptic(50);
 
-      // Check personal best
-      if (!personalBest || elapsed < personalBest) {
-        setPersonalBest(elapsed);
-        localStorage.setItem(`pb_${mode}`, elapsed.toString());
+      setTestState('RESULT');
+      if (audioEnabled) playSignalSound();
+      haptic.success();
+
+      if (!personalBest || ms < personalBest) {
+        setPersonalBest(ms);
+        localStorage.setItem(`pb_${playMode}`, String(ms));
         if (audioEnabled) playFanfareSound();
         try {
-          confetti({ particleCount: 60, spread: 60, origin: { y: 0.6 } });
-        } catch {}
+          confetti({
+            particleCount: 50,
+            spread: 62,
+            origin: { y: 0.6 },
+            colors: ['#00e87a', '#ffc53d', '#f3f6f8'],
+          });
+        } catch {
+          /* confetti is decorative */
+        }
       }
 
-      // Auto submit to server
-      onScoreSubmitted(elapsed, mode);
-    }
-  };
+      onScoreSubmitted(ms, playMode, isDailyEntry);
+      if (challenge) onChallengeSettled();
+    },
+    [
+      playMode,
+      isDailyEntry,
+      personalBest,
+      audioEnabled,
+      onScoreSubmitted,
+      challenge,
+      onChallengeSettled,
+    ]
+  );
 
-  const handlePatternTap = (buttonIdx: number) => {
-    if (testState !== 'SIGNAL') return;
+  /**
+   * Bound to `pointerdown`, never `click`.
+   *
+   * A click event fires on pointer *release*, so measuring it adds the full
+   * press-and-lift duration — commonly 60-120ms — to every recorded time. For a
+   * product whose entire premise is millisecond accuracy, that is the single
+   * most important detail in this file.
+   */
+  const handleTap = useCallback(
+    (e?: React.PointerEvent) => {
+      e?.stopPropagation();
 
-    if (buttonIdx === patternSequence[currentPatternIndex]) {
-      if (audioEnabled) playClickSound();
-      triggerHaptic(20);
-
-      if (currentPatternIndex + 1 === patternSequence.length) {
-        // Pattern complete!
-        const totalMs = Date.now() - patternStartTime;
-        setReactionTime(totalMs);
-        setTestState('RESULT');
-        if (audioEnabled) playFanfareSound();
-        onScoreSubmitted(totalMs, mode);
-      } else {
-        setCurrentPatternIndex((prev) => prev + 1);
+      if (testState === 'WAITING' || testState === 'TRAP_WARNING') {
+        if (timerRef.current) clearTimeout(timerRef.current);
+        setTestState('FALSE_START');
+        if (audioEnabled) playErrorSound();
+        haptic.error();
+        return;
       }
-    } else {
-      // Pattern error!
-      setTestState('FALSE_START');
-      if (audioEnabled) playErrorSound();
-      triggerHaptic([100, 50, 100]);
-    }
-  };
 
-  const handleReverseColorTap = (colorName: string) => {
+      if (testState === 'SIGNAL') {
+        recordResult(performance.now() - startTimeRef.current);
+      }
+    },
+    [testState, audioEnabled, recordResult]
+  );
+
+  const handlePatternTap = (index: number) => {
     if (testState !== 'SIGNAL') return;
 
-    if (colorName === reverseColorPrompt.correctColor) {
-      const totalMs = Date.now() - startTimeRef.current;
-      setReactionTime(totalMs);
-      setTestState('RESULT');
-      if (audioEnabled) playFanfareSound();
-      onScoreSubmitted(totalMs, mode);
-    } else {
+    if (index !== patternSequence[patternIndex]) {
       setTestState('FALSE_START');
       if (audioEnabled) playErrorSound();
+      haptic.error();
+      return;
+    }
+
+    if (audioEnabled) playClickSound();
+    haptic.light();
+
+    if (patternIndex + 1 === patternSequence.length) {
+      recordResult(performance.now() - startTimeRef.current);
+    } else {
+      setPatternIndex((prev) => prev + 1);
     }
   };
 
-  const rating = reactionTime ? getPercentileRating(reactionTime) : null;
+  const handleStroopTap = (color: string) => {
+    if (testState !== 'SIGNAL') return;
+
+    if (color === stroop.ink) {
+      recordResult(performance.now() - startTimeRef.current);
+    } else {
+      setTestState('FALSE_START');
+      if (audioEnabled) playErrorSound();
+      haptic.error();
+    }
+  };
 
   return (
-    <div className="flex flex-col h-full bg-[#020b1c] text-white select-none">
-      {/* Game Mode Selector Bar */}
-      <div className="flex items-center gap-2 px-3 py-2.5 bg-[#001026] border-b border-[#12284c] overflow-x-auto no-scrollbar text-xs">
-        <button
-          type="button"
-          onClick={() => { playSnap(); setMode('CLASSIC'); }}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black transition-all shrink-0 active:scale-95 whitespace-nowrap ${
-            mode === 'CLASSIC'
-              ? 'bg-gradient-to-r from-red-600 to-red-500 text-white shadow-md shadow-red-600/30 border border-yellow-400/60'
-              : 'bg-[#020b1c] border border-[#12284c] text-slate-300 hover:text-white hover:border-slate-700'
-          }`}
-        >
-          <Zap className="w-3.5 h-3.5 text-yellow-400 fill-current" />
-          <span>Classic</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => { playSnap(); setMode('FALSE_ALARM'); }}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black transition-all shrink-0 active:scale-95 whitespace-nowrap ${
-            mode === 'FALSE_ALARM'
-              ? 'bg-gradient-to-r from-red-600 to-red-500 text-white shadow-md shadow-red-600/30 border border-yellow-400/60'
-              : 'bg-[#020b1c] border border-[#12284c] text-slate-300 hover:text-white hover:border-slate-700'
-          }`}
-        >
-          <AlertTriangle className="w-3.5 h-3.5 text-yellow-400" />
-          <span>Trap Signal</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => { playSnap(); setMode('PATTERN_SEQUENCE'); }}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black transition-all shrink-0 active:scale-95 whitespace-nowrap ${
-            mode === 'PATTERN_SEQUENCE'
-              ? 'bg-gradient-to-r from-red-600 to-red-500 text-white shadow-md shadow-red-600/30 border border-yellow-400/60'
-              : 'bg-[#020b1c] border border-[#12284c] text-slate-300 hover:text-white hover:border-slate-700'
-          }`}
-        >
-          <RefreshCw className="w-3.5 h-3.5 text-yellow-400" />
-          <span>Speed Pattern</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => { playSnap(); setMode('PRECISION_TARGET'); }}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black transition-all shrink-0 active:scale-95 whitespace-nowrap ${
-            mode === 'PRECISION_TARGET'
-              ? 'bg-gradient-to-r from-red-600 to-red-500 text-white shadow-md shadow-red-600/30 border border-yellow-400/60'
-              : 'bg-[#020b1c] border border-[#12284c] text-slate-300 hover:text-white hover:border-slate-700'
-          }`}
-        >
-          <Target className="w-3.5 h-3.5 text-yellow-400" />
-          <span>Target Aim</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => { playSnap(); setMode('REVERSE_COLOR'); }}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black transition-all shrink-0 active:scale-95 whitespace-nowrap ${
-            mode === 'REVERSE_COLOR'
-              ? 'bg-gradient-to-r from-red-600 to-red-500 text-white shadow-md shadow-red-600/30 border border-yellow-400/60'
-              : 'bg-[#020b1c] border border-[#12284c] text-slate-300 hover:text-white hover:border-slate-700'
-          }`}
-        >
-          <Eye className="w-3.5 h-3.5 text-yellow-400" />
-          <span>Stroop Reverse</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => { playSnap(); setMode('DAILY_CHALLENGE'); }}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black transition-all shrink-0 active:scale-95 whitespace-nowrap ${
-            mode === 'DAILY_CHALLENGE'
-              ? 'bg-gradient-to-r from-red-600 to-red-500 text-white shadow-md shadow-red-600/30 border border-yellow-400/60'
-              : 'bg-[#020b1c] border border-[#12284c] text-slate-300 hover:text-white hover:border-slate-700'
-          }`}
-        >
-          <Trophy className="w-3.5 h-3.5 text-yellow-400" />
-          <span>Daily Event</span>
-        </button>
+    <div className="no-touch-callout flex h-full flex-col bg-pitch-900">
+      {/* Mode rail ------------------------------------------------------- */}
+      <div className="flex shrink-0 gap-1.5 overflow-x-auto no-scrollbar border-b border-pitch-700 px-4 py-2.5">
+        {MODES.map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => {
+              haptic.light();
+              setMode(id);
+            }}
+            className={cx(
+              'flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wider transition-colors',
+              mode === id
+                ? 'bg-ink text-pitch-950'
+                : 'border border-pitch-700 text-ink-faint hover:text-ink-muted'
+            )}
+          >
+            <Icon className="h-3.5 w-3.5" />
+            {label}
+          </button>
+        ))}
       </div>
 
-      {/* Main Interactive Game Area */}
-      <div className="flex-1 flex flex-col items-center justify-center relative p-4 overflow-hidden">
-        {/* State 1: IDLE */}
+      <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden p-5">
         {testState === 'IDLE' && (
-          <div className="text-center max-w-sm w-full space-y-6">
-            <div className="relative inline-flex items-center justify-center w-28 h-28 rounded-3xl bg-[#00122e] border-2 border-red-500/40 shadow-2xl p-4">
-              <div className="absolute inset-0 bg-gradient-to-tr from-red-600/20 via-yellow-400/20 to-red-600/10 rounded-3xl blur-xl" />
-              <Zap className="w-14 h-14 text-yellow-400 fill-yellow-400 animate-pulse" />
-            </div>
-
-            <div>
-              <h2 className="text-2xl font-black tracking-tight text-white flex items-center justify-center gap-2">
-                <span>
-                  {mode === 'CLASSIC' && 'Classic Reaction Test'}
-                  {mode === 'FALSE_ALARM' && 'Trap Signal Test'}
-                  {mode === 'PATTERN_SEQUENCE' && '4-Button Speed Sequence'}
-                  {mode === 'PRECISION_TARGET' && 'Precision Target Aim'}
-                  {mode === 'REVERSE_COLOR' && 'Reverse Stroop Challenge'}
-                  {mode === 'DAILY_CHALLENGE' && 'Daily Lightning Event'}
-                </span>
-              </h2>
-              <p className="text-xs text-slate-300 mt-1.5 px-4 font-medium">
-                {mode === 'CLASSIC' && 'Wait for the screen to turn bright green, then tap as fast as humanly possible!'}
-                {mode === 'FALSE_ALARM' && 'Tap ONLY when screen flashes GREEN! Avoid red and yellow decoy traps.'}
-                {mode === 'PATTERN_SEQUENCE' && 'Tap the highlighted sequence buttons as quickly as possible!'}
-                {mode === 'PRECISION_TARGET' && 'A glowing target will spawn randomly. Tap the exact target center!'}
-                {mode === 'REVERSE_COLOR' && 'Ignore the written word! Tap the button matching the INK COLOR!'}
-                {mode === 'DAILY_CHALLENGE' && "Compete for today's daily world streak! Beat 180ms to rank top."}
-              </p>
-            </div>
-
-            {personalBest && (
-              <div className="inline-flex items-center gap-2 bg-[#00122e] border border-yellow-400/40 px-3.5 py-1.5 rounded-full text-xs font-extrabold text-yellow-400 shadow-md">
-                <Trophy className="w-3.5 h-3.5 text-red-500" /> Your Personal Best: <span className="font-mono text-white font-black">{personalBest}ms</span>
-              </div>
-            )}
-
-            <button
-              onClick={startTest}
-              className="w-full py-4 rounded-2xl bg-gradient-to-r from-red-600 via-red-500 to-yellow-400 hover:from-red-500 hover:to-yellow-300 text-slate-950 font-black text-lg uppercase tracking-wider shadow-xl shadow-red-600/30 active:scale-95 transition-all transform border border-yellow-300"
-            >
-              LAUNCH REACTION TEST ⚡
-            </button>
-          </div>
+          <IdleScreen
+            title={isDailyEntry ? "Today's event" : activeMode.title}
+            brief={
+              isDailyEntry
+                ? `${MODE_LABELS[playMode]} — ${activeMode.brief}`
+                : activeMode.brief
+            }
+            dailyTargetMs={isDailyEntry ? dailyTargetMs : null}
+            personalBest={personalBest}
+            challenge={challenge}
+            onStart={startTest}
+          />
         )}
 
-        {/* State 2: WAITING */}
         {testState === 'WAITING' && (
-          <div
-            onClick={handleTap}
-            className="inset-0 absolute bg-[#00122e] flex flex-col items-center justify-center p-6 text-center cursor-pointer select-none"
+          <button
+            type="button"
+            onPointerDown={handleTap}
+            className="absolute inset-0 flex flex-col items-center justify-center bg-pitch-850 text-center"
           >
-            <div className="w-16 h-16 rounded-full border-4 border-slate-800 border-t-yellow-400 animate-spin mb-4" />
-            <h2 className="text-2xl font-black text-yellow-400 tracking-tight">WAIT FOR GREEN...</h2>
-            <p className="text-xs text-slate-400 mt-1">Do not tap yet! Tapping early counts as a false start.</p>
-          </div>
+            <Label>Hold</Label>
+            <div className="mt-3 font-display text-5xl font-extrabold uppercase tracking-tight text-ink">
+              Wait for green
+            </div>
+            <p className="mt-2 text-xs text-ink-faint">Tapping now is a false start</p>
+          </button>
         )}
 
-        {/* State 3: TRAP_WARNING (False Alarm) */}
         {testState === 'TRAP_WARNING' && (
-          <div
-            onClick={handleTap}
-            className="inset-0 absolute bg-red-950 flex flex-col items-center justify-center p-6 text-center cursor-pointer select-none animate-pulse"
+          <button
+            type="button"
+            onPointerDown={handleTap}
+            className="absolute inset-0 flex flex-col items-center justify-center bg-alert-deep text-center"
           >
-            <AlertTriangle className="w-16 h-16 text-red-500 mb-2" />
-            <h2 className="text-3xl font-black text-red-400 tracking-tight">DECOY TRAP! 🚨</h2>
-            <p className="text-sm font-semibold text-red-200 mt-1">DON'T TAP RED!</p>
-          </div>
+            <AlertTriangle className="h-12 w-12 text-white" />
+            <div className="mt-3 font-display text-5xl font-extrabold uppercase tracking-tight text-white">
+              Decoy
+            </div>
+            <p className="mt-2 text-xs font-semibold text-white/80">Do not tap</p>
+          </button>
         )}
 
-        {/* State 4: SIGNAL (TAP NOW!) */}
-        {testState === 'SIGNAL' && (
-          <>
-            {mode === 'PATTERN_SEQUENCE' ? (
-              <div className="w-full max-w-xs text-center space-y-4">
-                <div className="text-xs text-slate-300 uppercase font-mono tracking-wider font-extrabold">
-                  TAP SEQUENCE: STEP {currentPatternIndex + 1} / 4
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  {[0, 1, 2, 3].map((btnIdx) => {
-                    const isTarget = patternSequence[currentPatternIndex] === btnIdx;
-                    return (
-                      <button
-                        key={btnIdx}
-                        onClick={() => handlePatternTap(btnIdx)}
-                        className={`h-24 rounded-2xl font-black text-2xl transition-all transform active:scale-90 flex items-center justify-center shadow-lg ${
-                          isTarget
-                            ? 'bg-yellow-400 text-slate-950 ring-4 ring-yellow-300 scale-105 animate-pulse'
-                            : 'bg-[#00122e] text-slate-400 border border-[#12284c]'
-                        }`}
-                      >
-                        {btnIdx + 1}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : mode === 'PRECISION_TARGET' ? (
-              <div onClick={handleTap} className="inset-0 absolute bg-[#020b1c] overflow-hidden cursor-crosshair">
+        {testState === 'SIGNAL' && playMode === 'PATTERN_SEQUENCE' && (
+          <div className="w-full max-w-xs">
+            <Label className="mb-3 block text-center">
+              Step {patternIndex + 1} of {patternSequence.length}
+            </Label>
+            <div className="grid grid-cols-2 gap-2.5">
+              {[0, 1, 2, 3].map((index) => (
                 <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleTap();
-                  }}
-                  style={{ top: `${targetPos.y}%`, left: `${targetPos.x}%` }}
-                  className="absolute transform -translate-x-1/2 -translate-y-1/2 w-16 h-16 rounded-full bg-red-600 border-4 border-yellow-400 shadow-2xl shadow-red-600/80 animate-ping"
-                />
-              </div>
-            ) : mode === 'REVERSE_COLOR' ? (
-              <div className="w-full max-w-xs text-center space-y-6">
-                <div className="bg-[#00122e] border border-red-500/40 rounded-2xl p-6 shadow-xl">
-                  <span className="text-xs text-slate-300 font-mono block mb-1">TAP THE INK COLOR:</span>
-                  <span className={`text-4xl font-black uppercase tracking-widest ${reverseColorPrompt.inkColor}`}>
-                    {reverseColorPrompt.text}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  {['RED', 'BLUE', 'GREEN', 'YELLOW'].map((color) => {
-                    const bgClassMap: Record<string, string> = {
-                      RED: 'bg-red-600 hover:bg-red-500 text-white font-extrabold',
-                      BLUE: 'bg-sky-500 hover:bg-sky-400 text-slate-950 font-extrabold',
-                      GREEN: 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold',
-                      YELLOW: 'bg-yellow-400 hover:bg-yellow-300 text-slate-950 font-extrabold',
-                    };
-                    return (
-                      <button
-                        key={color}
-                        onClick={() => handleReverseColorTap(color)}
-                        className={`py-4 rounded-xl font-black text-sm uppercase transition-all active:scale-95 shadow-md ${bgClassMap[color]}`}
-                      >
-                        {color}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : (
-              <div
-                onClick={handleTap}
-                className="inset-0 absolute bg-emerald-500 flex flex-col items-center justify-center p-6 text-center cursor-pointer select-none animate-pulse"
-              >
-                <Zap className="w-20 h-20 text-slate-950 fill-slate-950 mb-2" />
-                <h2 className="text-4xl font-black text-slate-950 tracking-tight uppercase">TAP NOW! ⚡</h2>
-              </div>
-            )}
-          </>
+                  key={index}
+                  type="button"
+                  onPointerDown={() => handlePatternTap(index)}
+                  className={cx(
+                    'flex h-24 items-center justify-center rounded-md font-display text-3xl font-bold transition-transform active:scale-95',
+                    patternSequence[patternIndex] === index
+                      ? 'bg-signal text-pitch-950'
+                      : 'border border-pitch-700 bg-pitch-850 text-ink-faint'
+                  )}
+                >
+                  {index + 1}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
 
-        {/* State 5: FALSE_START */}
-        {testState === 'FALSE_START' && (
-          <div className="text-center max-w-sm w-full space-y-5 bg-red-950/60 border border-red-500/80 p-6 rounded-3xl">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-red-600/30 text-red-400 border border-red-500/50">
-              <AlertTriangle className="w-8 h-8" />
-            </div>
-            <div>
-              <h3 className="text-xl font-black text-red-300">Too Early! Jump Start</h3>
-              <p className="text-xs text-slate-300 mt-1">You tapped before the green signal flashed. Stay focused!</p>
-            </div>
+        {testState === 'SIGNAL' && playMode === 'PRECISION_TARGET' && (
+          <div className="absolute inset-0 cursor-crosshair" onPointerDown={handleTap}>
             <button
-              onClick={startTest}
-              className="w-full py-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-extrabold text-sm transition-all"
-            >
-              Try Again 🔄
-            </button>
+              type="button"
+              onPointerDown={handleTap}
+              style={{ top: `${targetPos.y}%`, left: `${targetPos.x}%` }}
+              aria-label="Target"
+              className="absolute h-16 w-16 -translate-x-1/2 -translate-y-1/2 rounded-full border-4 border-signal bg-signal/25"
+            />
           </div>
         )}
 
-        {/* State 6: RESULT */}
-        {testState === 'RESULT' && reactionTime && (
-          <div className="text-center max-w-sm w-full space-y-4 bg-[#00122e] border border-red-500/40 p-6 rounded-3xl shadow-2xl">
-            <div className="text-xs font-mono uppercase text-yellow-400 tracking-wider font-extrabold">ATHLETE REACTION TIME</div>
-            <div className="text-6xl font-black font-mono tracking-tight text-yellow-400">
-              {reactionTime}<span className="text-2xl text-red-500 font-black">ms</span>
-            </div>
-
-            {rating && (
-              <div className="bg-[#020b1c] border border-[#12284c] rounded-2xl p-3">
-                <div className={`text-sm font-bold flex items-center justify-center gap-1.5 ${rating.color}`}>
-                  <span>{rating.icon}</span>
-                  <span>{rating.rating}</span>
-                </div>
-                <div className="text-[11px] text-slate-300 mt-1">
-                  Faster than <span className="text-yellow-400 font-extrabold">{rating.percentile}%</span> of global humans!
-                </div>
+        {testState === 'SIGNAL' && playMode === 'REVERSE_COLOR' && (
+          <div className="w-full max-w-xs">
+            <div className="rounded-md border border-pitch-700 bg-pitch-850 p-6 text-center">
+              <Label>Tap the ink colour</Label>
+              <div
+                className={cx(
+                  'mt-2 font-display text-5xl font-extrabold uppercase tracking-widest',
+                  STROOP_INK[stroop.ink]
+                )}
+              >
+                {stroop.text}
               </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-2 pt-2">
-              <button
-                onClick={startTest}
-                className="py-3 rounded-xl bg-gradient-to-r from-red-600 to-red-500 text-white font-black text-xs flex items-center justify-center gap-1.5 active:scale-95 shadow-md"
-              >
-                <RotateCcw className="w-4 h-4" /> Retest
-              </button>
-
-              <button
-                onClick={() => openShareModal(reactionTime, mode)}
-                className="py-3 rounded-xl bg-yellow-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 active:scale-95 shadow-md"
-              >
-                <Share2 className="w-4 h-4 text-slate-950" /> Share Score
-              </button>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2.5">
+              {STROOP_COLORS.map((color) => (
+                <button
+                  key={color}
+                  type="button"
+                  onPointerDown={() => handleStroopTap(color)}
+                  className={cx(
+                    'rounded-md py-4 text-sm font-bold uppercase tracking-wider transition-transform active:scale-95',
+                    STROOP_BUTTON[color]
+                  )}
+                >
+                  {color}
+                </button>
+              ))}
             </div>
           </div>
+        )}
+
+        {testState === 'SIGNAL' &&
+          !['PATTERN_SEQUENCE', 'PRECISION_TARGET', 'REVERSE_COLOR'].includes(playMode) && (
+            <button
+              type="button"
+              onPointerDown={handleTap}
+              className="animate-signal-in absolute inset-0 flex flex-col items-center justify-center bg-signal text-center"
+            >
+              <div className="font-display text-7xl font-extrabold uppercase leading-none tracking-tight text-pitch-950">
+                Tap
+              </div>
+            </button>
+          )}
+
+        {testState === 'FALSE_START' && (
+          <div className="w-full max-w-sm rounded-md border border-alert/40 bg-pitch-850 p-6 text-center">
+            <AlertTriangle className="mx-auto h-8 w-8 text-alert" />
+            <h3 className="mt-3 font-display text-3xl font-bold uppercase tracking-tight text-ink">
+              False start
+            </h3>
+            <p className="mt-1.5 text-xs text-ink-faint">
+              {playMode === 'PATTERN_SEQUENCE'
+                ? 'Wrong button. The sequence resets.'
+                : playMode === 'REVERSE_COLOR'
+                ? 'That was the word, not the ink colour.'
+                : 'You went before the signal. Nothing recorded.'}
+            </p>
+            <Button variant="quiet" full className="mt-5" onClick={startTest}>
+              <RotateCcw className="h-4 w-4" /> Go again
+            </Button>
+          </div>
+        )}
+
+        {testState === 'TOO_SLOW' && reactionTime && (
+          <div className="w-full max-w-sm rounded-md border border-pitch-700 bg-pitch-850 p-6 text-center">
+            <Label>Not recorded</Label>
+            <div className="mt-2 font-display text-5xl font-bold text-ink-muted">
+              {(reactionTime / 1000).toFixed(1)}
+              <span className="ml-1 text-xl text-ink-faint">s</span>
+            </div>
+            <p className="mt-3 text-xs leading-relaxed text-ink-faint">
+              Times over {MAX_VALID_MS / 1000}s are treated as inattention rather than
+              reaction, so this one stays out of your record and your national average.
+            </p>
+            <Button variant="signal" full className="mt-5" onClick={startTest}>
+              <RotateCcw className="h-4 w-4" /> Try again
+            </Button>
+          </div>
+        )}
+
+        {testState === 'RESULT' && reactionTime && (
+          <ResultScreen
+            reactionTime={reactionTime}
+            mode={playMode}
+            country={country}
+            username={username}
+            personalBest={personalBest}
+            contribution={contribution}
+            standings={standings}
+            challenge={challenge}
+            onRetry={startTest}
+            onShare={() => openShareModal(reactionTime, mode)}
+          />
         )}
       </div>
     </div>

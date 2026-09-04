@@ -6,3 +6,30 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Capacitor native build output.
+# The ios/ and android/ project folders ARE committed — they hold signing
+# config, icons, and manifest edits. Only generated build artifacts are ignored.
+ios/App/Pods/
+ios/App/App/public/
+ios/App/output/
+ios/App/build/
+ios/DerivedData/
+android/app/src/main/assets/public/
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+android/captures/
+*.keystore
+!debug.keystore
+
+# Service-account and push credentials.
+# The Firebase service account JSON that OneSignal asks for on Android grants
+# admin access to the entire Firebase project — it is not a public config file
+# like firebase-applet-config.json. Never commit it.
+*-firebase-adminsdk-*.json
+service-account*.json
+serviceAccountKey*.json
+AuthKey_*.p8
+*.mobileprovision

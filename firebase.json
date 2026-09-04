@@ -1,0 +1,8 @@
+{
+  "firestore": [
+    {
+      "database": "ai-studio-worldreaction-f365f8c1-3ce8-43b9-a4dc-551cd66a49dc",
+      "rules": "firestore.rules"
+    }
+  ]
+}

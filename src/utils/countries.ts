@@ -1,4 +1,4 @@
-import { CountryStat } from '../types';
+import { isRestrictedCountry } from './restrictedCountries';
 
 export interface CountryInfo {
   code: string;
@@ -16,7 +16,14 @@ export function getFlagEmoji(countryCode: string): string {
   return String.fromCodePoint(...codePoints);
 }
 
-export const COUNTRIES: CountryInfo[] = [
+/**
+ * Every country the app knows how to name and draw.
+ *
+ * Kept complete so a profile or score stored before a restriction was added
+ * still resolves to a real name and flag rather than breaking. Use `COUNTRIES`
+ * for anything a player can choose.
+ */
+export const ALL_COUNTRIES: CountryInfo[] = [
   { code: 'AF', name: 'Afghanistan', flag: getFlagEmoji('AF'), continent: 'AS' },
   { code: 'AL', name: 'Albania', flag: getFlagEmoji('AL'), continent: 'EU' },
   { code: 'DZ', name: 'Algeria', flag: getFlagEmoji('DZ'), continent: 'AF' },
@@ -217,43 +224,53 @@ export const COUNTRIES: CountryInfo[] = [
   { code: 'ZW', name: 'Zimbabwe', flag: getFlagEmoji('ZW'), continent: 'AF' },
 ];
 
+/**
+ * The countries a player can actually represent.
+ *
+ * Restricted markets are removed at the source so no picker, search or filter
+ * has to remember to exclude them.
+ */
+export const COUNTRIES: CountryInfo[] = ALL_COUNTRIES.filter(
+  (country) => !isRestrictedCountry(country.code)
+);
+
 export const AVATARS = [
   '⚡', '🐆', '🦅', '🎯', '🚀', '🔥', '👑', '🐺', '🐉', '🤖', '👾', '🐱', '🦊', '🦁', '🐼', '🦄'
 ];
 
 export function getCountryFlag(code: string): string {
   if (!code) return '🌐';
-  const found = COUNTRIES.find((c) => c.code.toUpperCase() === code.toUpperCase());
+  const found = ALL_COUNTRIES.find((c) => c.code.toUpperCase() === code.toUpperCase());
   return found ? found.flag : getFlagEmoji(code);
 }
 
 export function getCountryName(code: string): string {
   if (!code) return 'Worldwide';
-  const found = COUNTRIES.find((c) => c.code.toUpperCase() === code.toUpperCase());
+  const found = ALL_COUNTRIES.find((c) => c.code.toUpperCase() === code.toUpperCase());
   return found ? found.name : code.toUpperCase();
 }
 
-export const INITIAL_COUNTRY_STATS: CountryStat[] = [
-  { country: 'JP', name: 'Japan', flag: getFlagEmoji('JP'), avgMs: 182, totalPlayers: 14200, bestMs: 138 },
-  { country: 'KR', name: 'South Korea', flag: getFlagEmoji('KR'), avgMs: 185, totalPlayers: 12800, bestMs: 135 },
-  { country: 'DE', name: 'Germany', flag: getFlagEmoji('DE'), avgMs: 191, totalPlayers: 18400, bestMs: 141 },
-  { country: 'SE', name: 'Sweden', flag: getFlagEmoji('SE'), avgMs: 193, totalPlayers: 8900, bestMs: 144 },
-  { country: 'US', name: 'United States', flag: getFlagEmoji('US'), avgMs: 198, totalPlayers: 48200, bestMs: 139 },
-  { country: 'GB', name: 'United Kingdom', flag: getFlagEmoji('GB'), avgMs: 201, totalPlayers: 21500, bestMs: 143 },
-  { country: 'CA', name: 'Canada', flag: getFlagEmoji('CA'), avgMs: 204, totalPlayers: 11300, bestMs: 146 },
-  { country: 'AU', name: 'Australia', flag: getFlagEmoji('AU'), avgMs: 206, totalPlayers: 9400, bestMs: 148 },
-  { country: 'BR', name: 'Brazil', flag: getFlagEmoji('BR'), avgMs: 209, totalPlayers: 16700, bestMs: 142 },
-  { country: 'FR', name: 'France', flag: getFlagEmoji('FR'), avgMs: 211, totalPlayers: 13900, bestMs: 147 },
-  { country: 'IN', name: 'India', flag: getFlagEmoji('IN'), avgMs: 214, totalPlayers: 31200, bestMs: 145 },
-  { country: 'ES', name: 'Spain', flag: getFlagEmoji('ES'), avgMs: 216, totalPlayers: 10800, bestMs: 151 },
-];
+/**
+ * Published reference point for a simple visual reaction test, used only to
+ * tell a first-time player whether they are fast before enough live data
+ * exists to say so. Always labelled as a reference, never as live data.
+ */
+export const WORLD_REFERENCE_AVG_MS = 273;
 
-export function getPercentileRating(ms: number): { rating: string; percentile: number; color: string; icon: string } {
-  if (ms < 150) return { rating: 'Godlike Reflexes', percentile: 99.8, color: 'text-amber-400', icon: '⚡' };
-  if (ms < 175) return { rating: 'Pro Gamer Speed', percentile: 98.2, color: 'text-purple-400', icon: '🦅' };
-  if (ms < 200) return { rating: 'Cheetah Reflexes', percentile: 92.5, color: 'text-emerald-400', icon: '🐆' };
-  if (ms < 230) return { rating: 'Fast Human', percentile: 81.0, color: 'text-cyan-400', icon: '🚀' };
-  if (ms < 270) return { rating: 'Average Human', percentile: 52.0, color: 'text-blue-400', icon: '🧍' };
-  if (ms < 320) return { rating: 'Sleepy Eyes', percentile: 25.0, color: 'text-orange-400', icon: '☕' };
-  return { rating: 'Turtle Speed', percentile: 8.0, color: 'text-rose-400', icon: '🐢' };
+export interface ReactionTier {
+  rating: string;
+  percentile: number;
+  /** Token-based class from the Stadium palette. */
+  color: string;
+  icon: string;
+}
+
+export function getPercentileRating(ms: number): ReactionTier {
+  if (ms < 150) return { rating: 'Elite', percentile: 99.8, color: 'text-gold', icon: '⚡' };
+  if (ms < 175) return { rating: 'Professional', percentile: 98.2, color: 'text-signal', icon: '🦅' };
+  if (ms < 200) return { rating: 'Advanced', percentile: 92.5, color: 'text-signal', icon: '🐆' };
+  if (ms < 230) return { rating: 'Quick', percentile: 81.0, color: 'text-ink', icon: '🚀' };
+  if (ms < 270) return { rating: 'Average', percentile: 52.0, color: 'text-ink-muted', icon: '🧍' };
+  if (ms < 320) return { rating: 'Slow', percentile: 25.0, color: 'text-ink-muted', icon: '☕' };
+  return { rating: 'Very slow', percentile: 8.0, color: 'text-ink-faint', icon: '🐢' };
 }

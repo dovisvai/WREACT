@@ -2,7 +2,8 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions for security validation
+    // ---- Helpers ----------------------------------------------------------
+
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -19,51 +20,93 @@ service cloud.firestore {
       return code is string && code.size() >= 2 && code.size() <= 3;
     }
 
-    // Athletes Collection
-    // - Public read for leaderboard presentation
-    // - Write strictly restricted to authenticated owner
-    // - Validates field types and constraints (prevent tampering with scores/ranks)
+    // Markets the app does not accept entries from: comprehensive OFAC
+    // sanctions programmes (Cuba, Iran, North Korea, Syria) and markets where
+    // the app stores have withdrawn payments (Russia, Belarus). Enforced here
+    // as well as in the client and the server, so a direct write to the
+    // database cannot bypass it. Keep in sync with
+    // src/utils/restrictedCountries.ts.
+    function isAcceptedCountry(code) {
+      return isValidCountry(code)
+             && !(code.upper() in ['CU', 'IR', 'KP', 'SY', 'RU', 'BY']);
+    }
+
+    // A reaction time the human body can actually produce. 80ms is below the
+    // physiological floor for visual reaction; anything past 2s is inattention
+    // rather than reflex. Both would corrupt a national average, so both are
+    // rejected at the database rather than trusted from the client.
+    function isPlausibleReaction(ms) {
+      return ms is number && ms >= 80 && ms <= 2000;
+    }
+
+    function isKnownMode(mode) {
+      return mode in [
+        'CLASSIC',
+        'FALSE_ALARM',
+        'PATTERN_SEQUENCE',
+        'PRECISION_TARGET',
+        'REVERSE_COLOR',
+        'DAILY_CHALLENGE'
+      ];
+    }
+
+    // ---- Athletes ---------------------------------------------------------
+    // Public read so the leaderboard can render without an account.
+    // Writes restricted to the authenticated owner, with the field set pinned
+    // so a caller cannot pad a document with arbitrary payload.
     match /athletes/{userId} {
       allow read: if true;
-      
-      allow create: if isOwner(userId)
-                    && isNonEmptyString(request.resource.data.username, 30)
-                    && isValidCountry(request.resource.data.country);
 
-      allow update: if isOwner(userId)
-                    && (!('username' in request.resource.data) || isNonEmptyString(request.resource.data.username, 30))
-                    && (!('country' in request.resource.data) || isValidCountry(request.resource.data.country))
-                    && (!('bestScore' in request.resource.data) || request.resource.data.bestScore == null || (request.resource.data.bestScore is number && request.resource.data.bestScore >= 50));
+      allow create, update: if isOwner(userId)
+        && request.resource.data.keys().hasOnly([
+             'userId', 'username', 'country', 'avatar', 'streakDays',
+             'bestScore', 'testsCompleted', 'unlockedBadges',
+             'verifiedAthlete', 'proPassActive', 'updatedAt'
+           ])
+        && (!('username' in request.resource.data)
+             || isNonEmptyString(request.resource.data.username, 30))
+        && (!('country' in request.resource.data)
+             || isAcceptedCountry(request.resource.data.country))
+        // Matches the same floor the scores collection enforces, so a profile
+        // cannot advertise a best time the scores table would have rejected.
+        && (!('bestScore' in request.resource.data)
+             || request.resource.data.bestScore == null
+             || isPlausibleReaction(request.resource.data.bestScore));
 
       allow delete: if isOwner(userId);
     }
 
-    // Reaction Scores Collection
-    // - Global public read for world and national leaderboards
-    // - Anti-Cheat Hardening: Strictly enforces biologically plausible reaction window (>= 50ms and <= 5000ms)
-    // - Prevents spoofing of excessive payload size, non-string identifiers, or falsified timestamps
+    // ---- Reaction scores --------------------------------------------------
+    // Public read for the world and national tables.
+    // Every score must be attributable: writes require auth and the document's
+    // userId must be the caller. Anonymous auth satisfies this, so no sign-up
+    // is needed to compete, but one device cannot post as another athlete.
     match /reaction_scores/{scoreId} {
       allow read: if true;
-      
-      allow create: if request.resource.data.scoreMs is number
-                    && request.resource.data.scoreMs >= 50
-                    && request.resource.data.scoreMs <= 5000
-                    && isNonEmptyString(request.resource.data.username, 30)
-                    && isValidCountry(request.resource.data.country)
-                    && isNonEmptyString(request.resource.data.userId, 128);
 
-      allow update: if false; // Scores are immutable once verified
+      allow create: if isAuthenticated()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+             'userId', 'username', 'country', 'avatar', 'scoreMs',
+             'mode', 'tier', 'createdAt', 'timestamp'
+           ])
+        && isPlausibleReaction(request.resource.data.scoreMs)
+        && isKnownMode(request.resource.data.mode)
+        && isNonEmptyString(request.resource.data.username, 30)
+        && isAcceptedCountry(request.resource.data.country);
+
+      allow update: if false; // Scores are immutable once recorded.
       allow delete: if isAuthenticated() && request.auth.uid == resource.data.userId;
     }
 
-    // Duel Rooms Collection
-    // - Validates room format, player slots, and status state machine
+    // ---- Duel rooms -------------------------------------------------------
+    // Duels run entirely over the WebSocket server and never touch Firestore.
+    // The previous rules allowed any unauthenticated caller to create and
+    // overwrite documents here, which was an open write surface on a collection
+    // nothing reads — free storage abuse and billing exposure for no feature.
+    // Closed until duels actually need persistence.
     match /duel_rooms/{roomId} {
-      allow read: if true;
-      allow create: if isNonEmptyString(request.resource.data.roomCode, 10)
-                    && request.resource.data.status in ['WAITING', 'COUNTDOWN', 'SIGNAL', 'FINISHED'];
-      allow update: if request.resource.data.status in ['WAITING', 'COUNTDOWN', 'SIGNAL', 'FINISHED'];
-      allow delete: if isAuthenticated();
+      allow read, write: if false;
     }
   }
 }

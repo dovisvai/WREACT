@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">WREACT</string>
+    <string name="title_activity_main">WREACT</string>
+    <string name="package_name">com.wreact.app</string>
+    <string name="custom_url_scheme">com.wreact.app</string>
+</resources>

@@ -1,7 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Swords } from 'lucide-react';
 import { getCountryFlag } from '../utils/countries';
-import { Swords, Zap, AlertTriangle, ShieldCheck, Trophy, RotateCcw, UserPlus } from 'lucide-react';
-import { playSignalSound, playClickSound, playErrorSound, playFanfareSound, triggerHaptic } from '../utils/audio';
+import { isPlausibleReaction } from '../utils/standings';
+import { playSignalSound, playClickSound, playFanfareSound } from '../utils/audio';
+import { haptic } from '../services/native';
+import { wsUrl } from '../services/api';
+import { Button, Flag, Label, Panel, cx } from './ui/Primitives';
 
 interface LiveDuelLobbyProps {
   username: string;
@@ -19,27 +23,34 @@ interface DuelPlayerState {
   falseStart?: boolean;
 }
 
+type DuelStatus = 'IDLE' | 'SEARCHING' | 'MATCHED' | 'COUNTDOWN' | 'SIGNAL' | 'FINISHED';
+
 export const LiveDuelLobby: React.FC<LiveDuelLobbyProps> = ({
   username,
   country,
   avatar,
   audioEnabled,
 }) => {
-  const [status, setStatus] = useState<'IDLE' | 'SEARCHING' | 'MATCHED' | 'COUNTDOWN' | 'SIGNAL' | 'FINISHED'>('IDLE');
+  const [status, setStatus] = useState<DuelStatus>('IDLE');
   const [roomCode, setRoomCode] = useState<string | null>(null);
   const [players, setPlayers] = useState<DuelPlayerState[]>([]);
-  const [countdown, setCountdown] = useState<number>(3);
+  const [countdown, setCountdown] = useState(3);
   const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
 
   const socketRef = useRef<WebSocket | null>(null);
-  const signalTimeRef = useRef<number>(0);
+
+  /**
+   * When the signal arrived on *this* device, on the monotonic clock.
+   *
+   * The reaction is measured locally and the measurement is sent to the server.
+   * Timing it server-side instead would fold the network round-trip into every
+   * result, which turns the duel into a contest of who has the better ping.
+   */
+  const signalAtRef = useRef<number>(0);
+  const tappedRef = useRef(false);
 
   useEffect(() => {
-    // Establish WS connection for real-time duel
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-
-    const ws = new WebSocket(wsUrl);
+    const ws = new WebSocket(wsUrl());
     socketRef.current = ws;
 
     ws.onmessage = (e) => {
@@ -50,28 +61,33 @@ export const LiveDuelLobby: React.FC<LiveDuelLobbyProps> = ({
           setRoomCode(data.room.roomId);
           setPlayers(data.room.players);
           setStatus('MATCHED');
-          const me = data.room.players.find((p: DuelPlayerState) => p.username === username);
+          const me = data.room.players.find(
+            (p: DuelPlayerState) => p.username === username
+          );
           if (me) setMyPlayerId(me.id);
         }
 
         if (data.type === 'DUEL_COUNTDOWN') {
           setStatus('COUNTDOWN');
           setCountdown(data.seconds);
+          tappedRef.current = false;
           if (audioEnabled) playClickSound();
         }
 
         if (data.type === 'DUEL_SIGNAL') {
+          signalAtRef.current = performance.now();
           setStatus('SIGNAL');
-          signalTimeRef.current = data.signalTime;
           if (audioEnabled) playSignalSound();
-          triggerHaptic([50, 30, 50]);
+          haptic.signal();
         }
 
         if (data.type === 'DUEL_PROGRESS') {
           setPlayers((prev) =>
             prev.map((p) => {
-              const updated = data.players.find((p2: { id: string }) => p2.id === p.id);
-              return updated ? { ...p, scoreMs: updated.scoreMs, falseStart: updated.falseStart } : p;
+              const updated = data.players.find((o: { id: string }) => o.id === p.id);
+              return updated
+                ? { ...p, scoreMs: updated.scoreMs, falseStart: updated.falseStart }
+                : p;
             })
           );
         }
@@ -80,158 +96,194 @@ export const LiveDuelLobby: React.FC<LiveDuelLobbyProps> = ({
           setPlayers(data.players);
           setStatus('FINISHED');
           if (audioEnabled) playFanfareSound();
+          haptic.success();
         }
       } catch (err) {
-        console.error('WS parse error in Duel', err);
+        console.error('WS parse error in duel', err);
       }
     };
 
-    return () => {
-      ws.close();
-    };
-  }, [username]);
+    return () => ws.close();
+  }, [username, audioEnabled]);
 
   const startMatchmaking = () => {
     setStatus('SEARCHING');
-    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-      socketRef.current.send(
-        JSON.stringify({
-          type: 'JOIN_DUEL',
-          payload: { username, country, avatar },
-        })
-      );
-    }
+    haptic.medium();
+    socketRef.current?.send(
+      JSON.stringify({ type: 'JOIN_DUEL', payload: { username, country, avatar } })
+    );
   };
 
   const handleDuelTap = () => {
-    if (!roomCode || !myPlayerId) return;
+    if (!roomCode || !myPlayerId || tappedRef.current) return;
+    tappedRef.current = true;
 
-    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-      socketRef.current.send(
-        JSON.stringify({
-          type: 'DUEL_TAP',
-          payload: { roomId: roomCode, playerId: myPlayerId },
-        })
-      );
-    }
+    const measured = Math.round(performance.now() - signalAtRef.current);
+
+    socketRef.current?.send(
+      JSON.stringify({
+        type: 'DUEL_TAP',
+        payload: {
+          roomId: roomCode,
+          playerId: myPlayerId,
+          // Server validates this; it falls back to its own clock if absent.
+          reactionMs: isPlausibleReaction(measured) ? measured : null,
+        },
+      })
+    );
   };
 
   const me = players.find((p) => p.id === myPlayerId || p.username === username);
   const rival = players.find((p) => p !== me);
 
+  const winner =
+    status === 'FINISHED'
+      ? players
+          .filter((p) => !p.falseStart && typeof p.scoreMs === 'number')
+          .sort((a, b) => (a.scoreMs ?? 0) - (b.scoreMs ?? 0))[0]
+      : undefined;
+
   return (
-    <div className="flex flex-col h-full bg-[#020b1c] text-white select-none p-4 items-center justify-center relative overflow-hidden">
+    <div className="no-touch-callout relative flex h-full flex-col items-center justify-center overflow-hidden bg-pitch-900 p-5">
       {status === 'IDLE' && (
-        <div className="text-center max-w-sm w-full space-y-6">
-          <div className="relative inline-flex items-center justify-center w-24 h-24 rounded-3xl bg-[#00122e] border-2 border-red-500/40 shadow-2xl p-4">
-            <Swords className="w-12 h-12 text-yellow-400 animate-pulse" />
-          </div>
+        <div className="w-full max-w-sm text-center">
+          <Swords className="mx-auto h-10 w-10 text-ink-muted" />
+          <h2 className="mt-4 font-display text-4xl font-extrabold uppercase leading-none tracking-tight text-ink">
+            Head to head
+          </h2>
+          <p className="mx-auto mt-3 max-w-[18rem] text-sm leading-relaxed text-ink-muted">
+            Matched against a live opponent anywhere in the world. Same signal, same
+            moment — fastest thumb wins.
+          </p>
 
-          <div>
-            <h2 className="text-2xl font-black tracking-tight text-white">Live 1v1 Reaction Duel</h2>
-            <p className="text-xs text-slate-300 font-medium mt-1.5 px-2">
-              Match with a live opponent across the world in real-time WebSocket sync! Who has faster reflexes?
-            </p>
-          </div>
-
-          <div className="bg-[#00122e] border border-red-500/30 rounded-2xl p-4 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-2xl">{avatar}</span>
+          <Panel className="mt-6 flex items-center justify-between p-4">
+            <div className="flex items-center gap-3">
+              <span className="text-2xl leading-none">{avatar}</span>
               <div className="text-left">
-                <span className="font-extrabold text-sm text-slate-100 block">{username}</span>
-                <span className="text-xs text-slate-300 font-medium">{getCountryFlag(country)} Ready</span>
+                <div className="text-sm font-semibold text-ink">{username}</div>
+                <div className="text-[11px] text-ink-faint">
+                  <Flag code={country} emoji={getCountryFlag(country)} /> Ready
+                </div>
               </div>
             </div>
-            <div className="text-right font-mono text-xs text-yellow-400 font-black">1v1 Arena</div>
-          </div>
+            <Label>1v1</Label>
+          </Panel>
 
-          <button
-            onClick={startMatchmaking}
-            className="w-full py-4 rounded-2xl bg-gradient-to-r from-red-600 via-red-500 to-yellow-400 hover:from-red-500 hover:to-yellow-300 text-slate-950 font-black text-lg uppercase tracking-wider shadow-xl shadow-red-600/30 active:scale-95 transition-all border border-yellow-300"
-          >
-            FIND WORLD RIVAL ⚡
-          </button>
+          <Button variant="signal" size="lg" full className="mt-6" onClick={startMatchmaking}>
+            Find an opponent
+          </Button>
         </div>
       )}
 
       {status === 'SEARCHING' && (
-        <div className="text-center max-w-sm w-full space-y-6">
-          <div className="w-20 h-20 rounded-full border-4 border-red-500/30 border-t-yellow-400 animate-spin mx-auto" />
-          <div>
-            <h3 className="text-xl font-black text-white">Searching WREACT Arena...</h3>
-            <p className="text-xs text-slate-300 font-medium mt-1">Connecting to online opponent via WebSocket</p>
-          </div>
+        <div className="text-center">
+          <div className="mx-auto h-12 w-12 animate-spin rounded-full border-2 border-pitch-700 border-t-signal" />
+          <h3 className="mt-5 font-display text-2xl font-bold uppercase tracking-tight text-ink">
+            Finding an opponent
+          </h3>
+          <p className="mt-1.5 text-xs text-ink-faint">Waiting for another athlete</p>
+          <Button variant="ghost" size="sm" className="mt-5" onClick={() => setStatus('IDLE')}>
+            Cancel
+          </Button>
         </div>
       )}
 
       {(status === 'MATCHED' || status === 'COUNTDOWN') && (
-        <div className="text-center max-w-sm w-full space-y-6">
-          <div className="flex items-center justify-around bg-[#00122e] border border-red-500/40 rounded-2xl p-5">
-            <div className="text-center">
-              <span className="text-4xl block mb-1">{avatar}</span>
-              <span className="font-extrabold text-xs text-slate-200 block">{username}</span>
-              <span className="text-[10px] text-slate-400">{getCountryFlag(country)}</span>
+        <div className="w-full max-w-sm">
+          <Panel className="p-5">
+            <div className="flex items-center justify-between">
+              <Competitor avatar={avatar} name={username} country={country} isYou />
+              <span className="font-display text-xl font-bold text-ink-faint">V</span>
+              <Competitor
+                avatar={rival?.avatar || '⚡'}
+                name={rival?.username || 'Waiting'}
+                country={rival?.country || ''}
+              />
             </div>
+          </Panel>
 
-            <div className="text-2xl font-black text-yellow-400 animate-pulse font-mono">VS</div>
-
-            <div className="text-center">
-              <span className="text-4xl block mb-1">{rival?.avatar || '⚡'}</span>
-              <span className="font-extrabold text-xs text-slate-200 block">{rival?.username || 'Rival'}</span>
-              <span className="text-[10px] text-slate-400">{rival ? getCountryFlag(rival.country) : 'Searching'}</span>
+          <div className="mt-4 text-center">
+            <Label>Get ready</Label>
+            <div className="animate-count-pop mt-2 font-display text-7xl font-extrabold leading-none text-ink">
+              {countdown}
             </div>
-          </div>
-
-          <div className="bg-[#00122e] border border-yellow-400/30 rounded-2xl p-6">
-            <span className="text-xs font-mono uppercase text-yellow-400 font-black block mb-2">COUNTDOWN</span>
-            <span className="text-6xl font-black font-mono text-white animate-ping block">{countdown}</span>
+            <p className="mt-3 text-xs text-ink-faint">
+              Tap the moment the screen turns green
+            </p>
           </div>
         </div>
       )}
 
       {status === 'SIGNAL' && (
-        <div
-          onClick={handleDuelTap}
-          className="inset-0 absolute bg-emerald-500 flex flex-col items-center justify-center p-6 text-center cursor-pointer select-none animate-pulse"
+        <button
+          type="button"
+          onPointerDown={handleDuelTap}
+          className="animate-signal-in absolute inset-0 flex flex-col items-center justify-center bg-signal"
         >
-          <Zap className="w-20 h-20 text-slate-950 fill-slate-950 mb-2" />
-          <h2 className="text-4xl font-black text-slate-950 tracking-tight uppercase">TAP NOW! ⚡</h2>
-          <p className="text-xs text-slate-950 font-black mt-2">BEAT YOUR RIVAL!</p>
-        </div>
+          <div className="font-display text-7xl font-extrabold uppercase leading-none tracking-tight text-pitch-950">
+            Tap
+          </div>
+        </button>
       )}
 
       {status === 'FINISHED' && (
-        <div className="text-center max-w-sm w-full space-y-6 bg-[#00122e] border border-red-500/40 p-6 rounded-3xl shadow-2xl">
-          <Trophy className="w-12 h-12 text-yellow-400 mx-auto" />
-          <h2 className="text-2xl font-black text-white">DUEL RESULTS</h2>
+        <div className="w-full max-w-sm">
+          <div className="text-center">
+            <Label>Result</Label>
+            <h2 className="mt-1 font-display text-4xl font-extrabold uppercase leading-none tracking-tight text-ink">
+              {winner
+                ? winner.id === myPlayerId || winner.username === username
+                  ? 'You win'
+                  : 'You lose'
+                : 'No result'}
+            </h2>
+          </div>
 
-          <div className="space-y-3">
-            {players.map((p) => {
-              const isMe = p.id === myPlayerId || p.username === username;
+          <div className="mt-5 space-y-2">
+            {players.map((player) => {
+              const isMe = player.id === myPlayerId || player.username === username;
+              const isWinner = winner?.id === player.id;
+
               return (
                 <div
-                  key={p.id}
-                  className={`flex items-center justify-between p-3.5 rounded-xl border ${
-                    isMe ? 'bg-red-600/20 border-yellow-400/50' : 'bg-[#020b1c] border-[#12284c]'
-                  }`}
+                  key={player.id}
+                  className={cx(
+                    'flex items-center justify-between rounded-md border px-4 py-3',
+                    isWinner
+                      ? 'border-signal/40 bg-signal/10'
+                      : 'border-pitch-700 bg-pitch-850'
+                  )}
                 >
-                  <div className="flex items-center gap-2">
-                    <span className="text-xl">{p.avatar}</span>
-                    <div className="text-left">
-                      <span className="font-extrabold text-xs text-slate-200 block">
-                        {p.username} {isMe && '(You)'}
-                      </span>
-                      <span className="text-[10px] text-slate-400">{getCountryFlag(p.country)}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xl leading-none">{player.avatar}</span>
+                    <div>
+                      <div className="text-sm font-semibold text-ink">
+                        {player.username}
+                        {isMe && <span className="ml-1.5 text-ink-faint">you</span>}
+                      </div>
+                      <div className="text-[11px] text-ink-faint">
+                        <Flag code={player.country} emoji={getCountryFlag(player.country)} />
+                      </div>
                     </div>
                   </div>
 
                   <div className="text-right">
-                    {p.falseStart ? (
-                      <span className="text-xs font-black text-red-500">FALSE START</span>
-                    ) : p.scoreMs ? (
-                      <span className="text-lg font-black font-mono text-yellow-400">{p.scoreMs}ms</span>
+                    {player.falseStart ? (
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-alert">
+                        False start
+                      </span>
+                    ) : typeof player.scoreMs === 'number' ? (
+                      <span
+                        className={cx(
+                          'font-display text-xl font-bold',
+                          isWinner ? 'text-signal' : 'text-ink'
+                        )}
+                      >
+                        {player.scoreMs}
+                        <span className="text-[11px] text-ink-faint">ms</span>
+                      </span>
                     ) : (
-                      <span className="text-xs text-slate-400">No tap</span>
+                      <span className="text-[11px] text-ink-faint">No tap</span>
                     )}
                   </div>
                 </div>
@@ -239,14 +291,37 @@ export const LiveDuelLobby: React.FC<LiveDuelLobbyProps> = ({
             })}
           </div>
 
-          <button
-            onClick={() => setStatus('IDLE')}
-            className="w-full py-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-sm transition-all"
+          <Button
+            variant="signal"
+            full
+            className="mt-5"
+            onClick={() => {
+              setPlayers([]);
+              setRoomCode(null);
+              setMyPlayerId(null);
+              setStatus('IDLE');
+            }}
           >
-            Rematch Duel 🔄
-          </button>
+            Rematch
+          </Button>
         </div>
       )}
     </div>
   );
 };
+
+const Competitor: React.FC<{
+  avatar: string;
+  name: string;
+  country: string;
+  isYou?: boolean;
+}> = ({ avatar, name, country, isYou }) => (
+  <div className="flex-1 text-center">
+    <div className="text-3xl leading-none">{avatar}</div>
+    <div className="mt-2 truncate text-xs font-semibold text-ink">{name}</div>
+    <div className="text-[10px] text-ink-faint">
+      {country ? <Flag code={country} emoji={getCountryFlag(country)} /> : '—'}
+      {isYou && ' you'}
+    </div>
+  </div>
+);

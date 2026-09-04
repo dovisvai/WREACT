@@ -1,7 +1,16 @@
-import React, { useState } from 'react';
-import { X, Share2, Copy, Check, Download, Zap, Award, Globe, ShieldCheck } from 'lucide-react';
-import { getCountryFlag, getPercentileRating } from '../utils/countries';
-import { GameMode } from '../types';
+import React, { useMemo, useState } from 'react';
+import { X, Share2, Link2, Check, Loader2, Download } from 'lucide-react';
+import { CountryStanding, GameMode } from '../types';
+import { getCountryName, getPercentileRating } from '../utils/countries';
+import { rankAgainstNations } from '../utils/standings';
+import {
+  buildChallengeLink,
+  shareResult,
+  type ShareCardData,
+  type ShareOutcome,
+} from '../services/share';
+import { haptic } from '../services/native';
+import { Button, Label, cx } from './ui/Primitives';
 
 interface ShareCardModalProps {
   scoreMs: number;
@@ -9,6 +18,8 @@ interface ShareCardModalProps {
   username: string;
   country: string;
   avatar: string;
+  standing: CountryStanding | null;
+  standings: CountryStanding[];
   isOpen: boolean;
   onClose: () => void;
 }
@@ -19,107 +30,204 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = ({
   username,
   country,
   avatar,
+  standing,
+  standings,
   isOpen,
   onClose,
 }) => {
-  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [outcome, setOutcome] = useState<ShareOutcome | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  const code = country.toUpperCase();
+  const nations = useMemo(() => rankAgainstNations(standings, scoreMs), [standings, scoreMs]);
+  const tier = getPercentileRating(scoreMs);
+  const isNationalBest = Boolean(standing && scoreMs < standing.bestMs);
+
+  const cardData: ShareCardData = {
+    username,
+    country: code,
+    avatar,
+    scoreMs,
+    mode,
+    countryRank: standing?.rank ?? null,
+    countryAvgMs: standing?.qualified ? standing.avgMs : null,
+    beatsNations: nations.beats,
+    totalNations: nations.total,
+    isNationalBest,
+  };
+
+  const invite = { username, country: code, avatar, scoreMs, mode };
 
   if (!isOpen) return null;
 
-  const flag = getCountryFlag(country);
-  const rating = getPercentileRating(scoreMs);
-  const shareText = `⚡ I just reacted in ${scoreMs}ms on WREACT! (${rating.rating} ${rating.icon})\nBeat my reaction speed across the globe! 🌐🏆`;
+  const handleShare = async () => {
+    setBusy(true);
+    setOutcome(null);
+    await haptic.medium();
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(shareText);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
+    const result = await shareResult(cardData, invite);
+
+    setBusy(false);
+    setOutcome(result);
+    if (result === 'shared' || result === 'downloaded' || result === 'copied') {
+      await haptic.success();
+    }
+  };
+
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(buildChallengeLink(invite));
+      setLinkCopied(true);
+      await haptic.light();
+      setTimeout(() => setLinkCopied(false), 2400);
+    } catch {
+      /* clipboard unavailable — the share sheet remains the primary path */
+    }
+  };
+
+  const outcomeMessage: Partial<Record<ShareOutcome, string>> = {
+    shared: 'Sent.',
+    downloaded: 'Card saved and challenge text copied.',
+    copied: 'Challenge copied to clipboard.',
+    failed: 'Sharing is unavailable on this device.',
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-      <div className="relative w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-2xl text-white">
-        <button
-          onClick={onClose}
-          className="absolute top-3 right-3 p-1.5 rounded-full bg-slate-800 text-slate-400 hover:text-white"
-        >
-          <X className="w-4 h-4" />
-        </button>
-
-        <div className="text-center mb-4">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 border border-amber-500/30 rounded-full text-amber-400 text-xs font-semibold uppercase tracking-wider mb-2">
-            <Zap className="w-3.5 h-3.5 fill-amber-400" /> Reaction Speed Card
-          </div>
-          <h2 className="text-lg font-bold text-white">Share Your Global Score</h2>
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-pitch-950/80 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Share your result"
+    >
+      <div className="pad-safe-bottom w-full max-w-sm rounded-t-lg border border-pitch-700 bg-pitch-900 sm:rounded-lg">
+        <div className="flex items-center justify-between border-b border-pitch-700 px-4 py-3">
+          <Label as="h2">Share result</Label>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-faint transition-colors hover:bg-pitch-800 hover:text-ink"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
 
-        {/* The Card Rendered Preview */}
-        <div id="share-card-canvas" className="bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 border-2 border-indigo-500/40 rounded-2xl p-5 shadow-xl relative overflow-hidden mb-5">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
-          
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <span className="text-2xl">{avatar}</span>
-              <div>
-                <div className="flex items-center gap-1.5">
-                  <span className="font-bold text-sm text-white">{username}</span>
-                  <span className="text-base">{flag}</span>
+        <div className="p-4">
+          {/* Preview mirrors the rendered PNG so what they see is what posts. */}
+          <div className="relative overflow-hidden rounded-md border border-pitch-700 bg-pitch-850 px-5 py-6">
+            <div
+              aria-hidden
+              className="pointer-events-none absolute left-1/2 top-1/2 h-56 w-56 -translate-x-1/2 -translate-y-1/2 rounded-full bg-signal/10 blur-3xl"
+            />
+
+            <div className="relative">
+              <div className="flex items-baseline justify-between">
+                <span className="font-display text-base font-extrabold uppercase tracking-tight text-ink">
+                  WREACT
+                </span>
+                <Label>World standings</Label>
+              </div>
+
+              <div className="mt-5 text-center">
+                <div className="font-display text-5xl font-extrabold leading-none tracking-tight text-ink">
+                  {code}
                 </div>
-                <span className="text-[10px] text-slate-400 uppercase tracking-wide">
-                  {mode.replace('_', ' ')} MODE
+                <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-ink-muted">
+                  {getCountryName(code)}
+                </div>
+                {standing?.rank && (
+                  <div className="mt-1 text-[11px] font-bold text-gold">
+                    WORLD #{standing.rank}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-4 text-center">
+                <div className="font-display text-7xl font-extrabold leading-none text-signal">
+                  {scoreMs}
+                </div>
+                <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.3em] text-ink-muted">
+                  Milliseconds
+                </div>
+              </div>
+
+              <div className="mt-5 text-center">
+                {isNationalBest ? (
+                  <div className="font-display text-xl font-bold uppercase tracking-tight text-gold">
+                    Fastest in {code}
+                  </div>
+                ) : nations.total > 0 ? (
+                  <div className="font-display text-lg font-bold uppercase tracking-tight text-ink">
+                    Beats {nations.beats} of {nations.total} nations
+                  </div>
+                ) : (
+                  <div className={cx('text-sm font-semibold', tier.color)}>
+                    {tier.icon} {tier.rating}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-5 flex items-center justify-between border-t border-pitch-700 pt-3">
+                <span className="text-xs font-semibold text-ink">
+                  {avatar} @{username}
+                </span>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-signal">
+                  Can you beat it?
                 </span>
               </div>
             </div>
-
-            <div className="text-right">
-              <span className="text-[10px] font-mono text-cyan-400 uppercase block">WORLD RANK</span>
-              <span className="text-xs font-bold text-slate-200">Top {100 - rating.percentile < 1 ? '0.2%' : `${(100 - rating.percentile).toFixed(1)}%`}</span>
-            </div>
           </div>
 
-          <div className="text-center py-4 my-2 bg-slate-900/60 rounded-xl border border-slate-800/80">
-            <div className="text-5xl font-black font-mono tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-orange-400 to-yellow-300">
-              {scoreMs}<span className="text-2xl text-amber-400 font-semibold">ms</span>
-            </div>
-            <div className={`mt-1 text-sm font-bold flex items-center justify-center gap-1.5 ${rating.color}`}>
-              <span>{rating.icon}</span>
-              <span>{rating.rating}</span>
-            </div>
+          <div className="mt-4 space-y-2">
+            <Button variant="signal" size="lg" full onClick={handleShare} disabled={busy}>
+              {busy ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Building card
+                </>
+              ) : outcome === 'shared' ? (
+                <>
+                  <Check className="h-4 w-4" /> Shared
+                </>
+              ) : outcome === 'downloaded' ? (
+                <>
+                  <Download className="h-4 w-4" /> Saved
+                </>
+              ) : (
+                <>
+                  <Share2 className="h-4 w-4" /> Share the card
+                </>
+              )}
+            </Button>
+
+            <Button variant="quiet" full onClick={handleCopyLink}>
+              {linkCopied ? (
+                <>
+                  <Check className="h-4 w-4" /> Challenge link copied
+                </>
+              ) : (
+                <>
+                  <Link2 className="h-4 w-4" /> Copy challenge link
+                </>
+              )}
+            </Button>
           </div>
 
-          <div className="flex items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-slate-800/80">
-            <span className="flex items-center gap-1">
-              <Globe className="w-3 h-3 text-emerald-400" /> WREACT
-            </span>
-            <span className="flex items-center gap-1 font-mono text-indigo-400">
-              <ShieldCheck className="w-3 h-3" /> Verified Score
-            </span>
-          </div>
-        </div>
+          {outcome && outcomeMessage[outcome] && (
+            <p
+              className={cx(
+                'mt-3 text-center text-[11px]',
+                outcome === 'failed' ? 'text-alert' : 'text-ink-faint'
+              )}
+            >
+              {outcomeMessage[outcome]}
+            </p>
+          )}
 
-        {/* Actions */}
-        <div className="space-y-2">
-          <button
-            onClick={handleCopy}
-            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-bold shadow-lg shadow-orange-500/20 transition-all active:scale-95"
-          >
-            {copied ? (
-              <>
-                <Check className="w-4 h-4 stroke-[3]" /> Copied Challenge Text!
-              </>
-            ) : (
-              <>
-                <Copy className="w-4 h-4" /> Copy Social Challenge Text
-              </>
-            )}
-          </button>
-
-          <button
-            onClick={onClose}
-            className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-semibold transition-all"
-          >
-            Close
-          </button>
+          <p className="mt-3 text-center text-[11px] leading-relaxed text-ink-faint">
+            Anyone who opens your link starts a head-to-head against this time, and{' '}
+            {getCountryName(code)} takes the credit when you win.
+          </p>
         </div>
       </div>
     </div>

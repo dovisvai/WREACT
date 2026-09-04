@@ -1,5 +1,45 @@
-// RevenueCat Entitlements & Product Identifiers for App Store / StoreKit
+import {
+  Purchases,
+  LOG_LEVEL,
+  type PurchasesOffering,
+  type PurchasesPackage,
+  type CustomerInfo,
+} from '@revenuecat/purchases-capacitor';
+import { isNative, platform } from './native';
+
+/**
+ * RevenueCat integration.
+ *
+ * On iOS and Android this is the real SDK talking to StoreKit / Play Billing.
+ * On the web build — where no store exists — it falls back to a clearly
+ * labelled preview mode so the paywall can still be designed and reviewed in a
+ * browser. `isSimulated` tells the UI which one it is; never present preview
+ * mode to a user as a completed purchase.
+ */
+
 export const REVENUECAT_ENTITLEMENT_ID = 'pro_access';
+
+/* ---------------------------------------------------------------------------
+ * API keys.
+ *
+ * These are RevenueCat *public* SDK keys and are safe to ship in a client
+ * bundle. Replace the placeholders with the values from
+ * RevenueCat dashboard → Project settings → API keys.
+ * ------------------------------------------------------------------------- */
+export const REVENUECAT_KEYS = {
+  ios: import.meta.env.VITE_REVENUECAT_IOS_KEY ?? 'appl_REPLACE_WITH_YOUR_IOS_KEY',
+  android:
+    import.meta.env.VITE_REVENUECAT_ANDROID_KEY ?? 'goog_REPLACE_WITH_YOUR_ANDROID_KEY',
+};
+
+export function hasRealKeys(): boolean {
+  const key = platform() === 'android' ? REVENUECAT_KEYS.android : REVENUECAT_KEYS.ios;
+  return !key.includes('REPLACE_WITH');
+}
+
+/* ---------------------------------------------------------------------------
+ * Types — a thin shape the UI renders, mapped from either source.
+ * ------------------------------------------------------------------------- */
 
 export interface RevenueCatPackageInfo {
   identifier: string;
@@ -18,52 +58,69 @@ export interface RevenueCatPackageInfo {
       cycles: number;
     } | null;
   };
+  /** Present only for real SDK packages; required to actually purchase. */
+  native?: PurchasesPackage;
 }
 
 export interface RevenueCatOfferingData {
   identifier: string;
   serverDescription: string;
   availablePackages: RevenueCatPackageInfo[];
-  monthly?: RevenueCatPackageInfo;
-  annual?: RevenueCatPackageInfo;
-  lifetime?: RevenueCatPackageInfo;
+  /** True when these came from the preview fallback rather than the store. */
+  isSimulated: boolean;
 }
 
 export interface RevenueCatCustomerState {
   originalAppUserId: string;
   activeSubscriptions: string[];
   entitlements: {
-    active: Record<string, {
-      identifier: string;
-      isActive: boolean;
-      willRenew: boolean;
-      periodType: string;
-      latestPurchaseDate: string;
-      expirationDate: string | null;
-      productIdentifier: string;
-    }>;
+    active: Record<
+      string,
+      {
+        identifier: string;
+        isActive: boolean;
+        willRenew: boolean;
+        periodType: string;
+        latestPurchaseDate: string;
+        expirationDate: string | null;
+        productIdentifier: string;
+      }
+    >;
   };
   managementURL: string | null;
+  isSimulated: boolean;
 }
 
-// Default fallback offering catalog matching App Store IAP setup for Shipathon
-export const DEFAULT_OFFERING: RevenueCatOfferingData = {
-  identifier: 'default_paywall',
-  serverDescription: 'WREACT Pro Athlete Pass Offerings',
+/* ---------------------------------------------------------------------------
+ * Product catalogue used for the web preview and as the design reference for
+ * what to create in App Store Connect / Play Console.
+ * ------------------------------------------------------------------------- */
+
+export const PRODUCT_IDS = {
+  monthly: 'wreact_pro_monthly_399',
+  annual: 'wreact_pro_annual_2999',
+  lifetime: 'wreact_founder_lifetime_4999',
+} as const;
+
+export const PREVIEW_OFFERING: RevenueCatOfferingData = {
+  identifier: 'default',
+  serverDescription: 'WREACT Pro — preview catalogue (no store connected)',
+  isSimulated: true,
   availablePackages: [
     {
       identifier: '$rc_monthly',
       packageType: 'MONTHLY',
       product: {
-        identifier: 'wreact_pro_monthly_399',
-        title: 'WREACT Pro Athlete Monthly',
-        description: 'Unlimited 1v1 duels, millisecond perception telemetry, gold halo avatar and zero ads.',
+        identifier: PRODUCT_IDS.monthly,
+        title: 'WREACT Pro — Monthly',
+        description:
+          'Unlimited duels, full reaction telemetry, no ads, and a verified badge on the world standings.',
         price: 3.99,
         priceString: '$3.99',
         currencyCode: 'USD',
         introductoryPrice: {
-          price: 0.0,
-          priceString: '$0.00 (3-day trial)',
+          price: 0,
+          priceString: 'First 3 days free',
           period: 'P3D',
           cycles: 1,
         },
@@ -73,9 +130,9 @@ export const DEFAULT_OFFERING: RevenueCatOfferingData = {
       identifier: '$rc_annual',
       packageType: 'ANNUAL',
       product: {
-        identifier: 'wreact_pro_annual_2999',
-        title: 'WREACT Pro Athlete Annual (Best Value - Save 37%)',
-        description: 'Annual access to all telemetry graphs, custom sound packs, and national team captain perks.',
+        identifier: PRODUCT_IDS.annual,
+        title: 'WREACT Pro — Annual',
+        description: 'Everything in Pro, billed yearly. Save 37%.',
         price: 29.99,
         priceString: '$29.99',
         currencyCode: 'USD',
@@ -85,9 +142,9 @@ export const DEFAULT_OFFERING: RevenueCatOfferingData = {
       identifier: '$rc_lifetime',
       packageType: 'LIFETIME',
       product: {
-        identifier: 'wreact_founder_lifetime_4999',
-        title: 'WREACT Founder Lifetime Pass',
-        description: 'Permanent VIP unlock with exclusive Shipathon Gold Founder badge forever.',
+        identifier: PRODUCT_IDS.lifetime,
+        title: 'WREACT Founder — Lifetime',
+        description: 'One payment, permanent Pro, and a founder mark beside your name.',
         price: 49.99,
         priceString: '$49.99',
         currencyCode: 'USD',
@@ -96,44 +153,210 @@ export const DEFAULT_OFFERING: RevenueCatOfferingData = {
   ],
 };
 
+/* ---------------------------------------------------------------------------
+ * Mapping helpers
+ * ------------------------------------------------------------------------- */
+
+function mapPackage(pkg: PurchasesPackage): RevenueCatPackageInfo {
+  const product = pkg.product;
+  const intro = product.introPrice;
+
+  return {
+    identifier: pkg.identifier,
+    packageType: (pkg.packageType as RevenueCatPackageInfo['packageType']) ?? 'CUSTOM',
+    product: {
+      identifier: product.identifier,
+      title: product.title,
+      description: product.description,
+      price: product.price,
+      priceString: product.priceString,
+      currencyCode: product.currencyCode,
+      introductoryPrice: intro
+        ? {
+            price: intro.price,
+            priceString: intro.priceString,
+            period: intro.period ?? '',
+            cycles: intro.cycles ?? 1,
+          }
+        : null,
+    },
+    native: pkg,
+  };
+}
+
+function mapCustomerInfo(info: CustomerInfo): RevenueCatCustomerState {
+  const active: RevenueCatCustomerState['entitlements']['active'] = {};
+
+  for (const [key, entitlement] of Object.entries(info.entitlements.active ?? {})) {
+    active[key] = {
+      identifier: entitlement.identifier,
+      isActive: entitlement.isActive,
+      willRenew: entitlement.willRenew,
+      periodType: entitlement.periodType,
+      latestPurchaseDate: entitlement.latestPurchaseDate,
+      expirationDate: entitlement.expirationDate ?? null,
+      productIdentifier: entitlement.productIdentifier,
+    };
+  }
+
+  return {
+    originalAppUserId: info.originalAppUserId,
+    activeSubscriptions: info.activeSubscriptions ?? [],
+    entitlements: { active },
+    managementURL: info.managementURL ?? null,
+    isSimulated: false,
+  };
+}
+
+/* ---------------------------------------------------------------------------
+ * Service
+ * ------------------------------------------------------------------------- */
+
 class RevenueCatService {
-  private isConfigured: boolean = false;
-  private currentUserId: string = '';
-  private apiKey: string = '';
+  private configured = false;
+  private appUserId = '';
 
-  constructor() {
-    this.apiKey = 'appl_wreact_shipathon_demo_key';
+  /** True when running without a real store connection (web / missing keys). */
+  get isSimulated(): boolean {
+    return !isNative() || !hasRealKeys();
   }
 
-  public initialize(userId: string) {
-    this.currentUserId = userId || `user_anon_${Math.random().toString(36).substring(2, 9)}`;
-    this.isConfigured = true;
-    console.log(`[RevenueCat] Initialized SDK with App User ID: ${this.currentUserId}`);
-  }
+  async initialize(userId: string): Promise<void> {
+    this.appUserId = userId;
 
-  public async getOfferings(): Promise<RevenueCatOfferingData> {
-    // In live Capacitor/iOS runtime, this calls window.Purchases.getOfferings()
-    // For web preview & Shipathon staging, returns the active offering structure
-    try {
-      if (typeof window !== 'undefined' && (window as any).Purchases) {
-        const nativeOfferings = await (window as any).Purchases.getOfferings();
-        if (nativeOfferings?.current) {
-          return nativeOfferings.current;
-        }
+    if (this.isSimulated) {
+      if (isNative() && !hasRealKeys()) {
+        console.warn(
+          '[RevenueCat] Native platform detected but the API key is still a placeholder. ' +
+            'Set VITE_REVENUECAT_IOS_KEY / VITE_REVENUECAT_ANDROID_KEY to enable purchases.'
+        );
       }
-    } catch (e) {
-      console.warn('[RevenueCat] Native purchases not detected, using fallback offering:', e);
+      return;
     }
-    return DEFAULT_OFFERING;
+
+    if (this.configured) {
+      await Purchases.logIn({ appUserID: userId }).catch(() => {});
+      return;
+    }
+
+    try {
+      if (import.meta.env.DEV) {
+        await Purchases.setLogLevel({ level: LOG_LEVEL.DEBUG });
+      }
+
+      await Purchases.configure({
+        apiKey:
+          platform() === 'android' ? REVENUECAT_KEYS.android : REVENUECAT_KEYS.ios,
+        appUserID: userId,
+      });
+
+      this.configured = true;
+    } catch (err) {
+      console.error('[RevenueCat] configure failed:', err);
+    }
   }
 
-  public async getCustomerInfo(): Promise<RevenueCatCustomerState> {
-    const isPro = localStorage.getItem('wreact_pro_pass') === 'true';
-    const expiration = localStorage.getItem('wreact_pro_expiration') || '2027-12-31T23:59:59Z';
+  async getOfferings(): Promise<RevenueCatOfferingData> {
+    if (this.isSimulated) return PREVIEW_OFFERING;
+
+    try {
+      const { current } = await Purchases.getOfferings();
+      if (!current) return PREVIEW_OFFERING;
+
+      return {
+        identifier: current.identifier,
+        serverDescription: current.serverDescription,
+        availablePackages: (current as PurchasesOffering).availablePackages.map(mapPackage),
+        isSimulated: false,
+      };
+    } catch (err) {
+      console.warn('[RevenueCat] getOfferings failed, showing preview catalogue:', err);
+      return PREVIEW_OFFERING;
+    }
+  }
+
+  async getCustomerInfo(): Promise<RevenueCatCustomerState> {
+    if (this.isSimulated) return this.previewCustomerState();
+
+    try {
+      const { customerInfo } = await Purchases.getCustomerInfo();
+      return mapCustomerInfo(customerInfo);
+    } catch (err) {
+      console.warn('[RevenueCat] getCustomerInfo failed:', err);
+      return this.previewCustomerState();
+    }
+  }
+
+  async purchasePackage(
+    pkg: RevenueCatPackageInfo
+  ): Promise<{ success: boolean; cancelled: boolean; customerInfo: RevenueCatCustomerState }> {
+    if (this.isSimulated || !pkg.native) {
+      // Preview mode: unlock locally so the paywall and Pro states are testable
+      // in a browser. This grants nothing on a real device.
+      localStorage.setItem('wreact_preview_pro', 'true');
+      return { success: true, cancelled: false, customerInfo: this.previewCustomerState() };
+    }
+
+    try {
+      const { customerInfo } = await Purchases.purchasePackage({ aPackage: pkg.native });
+      return { success: true, cancelled: false, customerInfo: mapCustomerInfo(customerInfo) };
+    } catch (err) {
+      const cancelled = Boolean((err as { userCancelled?: boolean })?.userCancelled);
+      if (!cancelled) console.error('[RevenueCat] purchase failed:', err);
+      return {
+        success: false,
+        cancelled,
+        customerInfo: await this.getCustomerInfo(),
+      };
+    }
+  }
+
+  async restorePurchases(): Promise<{
+    success: boolean;
+    restored: boolean;
+    customerInfo: RevenueCatCustomerState;
+  }> {
+    if (this.isSimulated) {
+      const state = this.previewCustomerState();
+      return {
+        success: true,
+        restored: Boolean(state.entitlements.active[REVENUECAT_ENTITLEMENT_ID]),
+        customerInfo: state,
+      };
+    }
+
+    try {
+      const { customerInfo } = await Purchases.restorePurchases();
+      const mapped = mapCustomerInfo(customerInfo);
+      return {
+        success: true,
+        restored: Boolean(mapped.entitlements.active[REVENUECAT_ENTITLEMENT_ID]),
+        customerInfo: mapped,
+      };
+    } catch (err) {
+      console.error('[RevenueCat] restore failed:', err);
+      return { success: false, restored: false, customerInfo: await this.getCustomerInfo() };
+    }
+  }
+
+  /** Subscribe to entitlement changes (renewals, expiries, cross-device). */
+  async onCustomerInfoChanged(
+    handler: (state: RevenueCatCustomerState) => void
+  ): Promise<void> {
+    if (this.isSimulated) return;
+    try {
+      await Purchases.addCustomerInfoUpdateListener((info) => handler(mapCustomerInfo(info)));
+    } catch {
+      /* listener unsupported — entitlement still refreshes on app resume */
+    }
+  }
+
+  private previewCustomerState(): RevenueCatCustomerState {
+    const isPro = localStorage.getItem('wreact_preview_pro') === 'true';
 
     return {
-      originalAppUserId: this.currentUserId || 'athlete_user',
-      activeSubscriptions: isPro ? ['wreact_pro_monthly_399'] : [],
+      originalAppUserId: this.appUserId || 'preview-user',
+      activeSubscriptions: isPro ? [PRODUCT_IDS.monthly] : [],
       entitlements: {
         active: isPro
           ? {
@@ -143,50 +366,24 @@ class RevenueCatService {
                 willRenew: true,
                 periodType: 'NORMAL',
                 latestPurchaseDate: new Date().toISOString(),
-                expirationDate: expiration,
-                productIdentifier: 'wreact_pro_monthly_399',
+                expirationDate: null,
+                productIdentifier: PRODUCT_IDS.monthly,
               },
             }
           : {},
       },
-      managementURL: 'https://apps.apple.com/account/subscriptions',
-    };
-  }
-
-  public async purchasePackage(pkg: RevenueCatPackageInfo): Promise<{ success: boolean; customerInfo: RevenueCatCustomerState }> {
-    console.log(`[RevenueCat] Initiating StoreKit purchase for product: ${pkg.product.identifier} (${pkg.product.priceString})`);
-    
-    // Simulate StoreKit / RevenueCat purchase cycle with full local persistence
-    await new Promise((resolve) => setTimeout(resolve, 800));
-
-    localStorage.setItem('wreact_pro_pass', 'true');
-    localStorage.setItem('wreact_pro_product', pkg.product.identifier);
-    localStorage.setItem('wreact_pro_purchased_at', new Date().toISOString());
-
-    const customerInfo = await this.getCustomerInfo();
-    return {
-      success: true,
-      customerInfo,
-    };
-  }
-
-  public async restorePurchases(): Promise<{ success: boolean; restored: boolean; customerInfo: RevenueCatCustomerState }> {
-    console.log('[RevenueCat] Restoring purchases via Apple App Store receipt validation...');
-    await new Promise((resolve) => setTimeout(resolve, 900));
-
-    // Check if there was any historical receipt
-    const wasPro = localStorage.getItem('wreact_pro_pass') === 'true' || localStorage.getItem('wreact_pro_product') !== null;
-    if (wasPro) {
-      localStorage.setItem('wreact_pro_pass', 'true');
-    }
-
-    const customerInfo = await this.getCustomerInfo();
-    return {
-      success: true,
-      restored: wasPro,
-      customerInfo,
+      managementURL: null,
+      isSimulated: true,
     };
   }
 }
 
 export const revenueCat = new RevenueCatService();
+
+/** Convenience: does this customer hold Pro right now? */
+export function isProActive(state: RevenueCatCustomerState | null): boolean {
+  return Boolean(state?.entitlements.active[REVENUECAT_ENTITLEMENT_ID]?.isActive);
+}
+
+/** Kept for the existing paywall import; now points at the preview catalogue. */
+export const DEFAULT_OFFERING = PREVIEW_OFFERING;

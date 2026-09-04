@@ -2,32 +2,36 @@
   "appId": "com.wreact.app",
   "appName": "WREACT",
   "webDir": "dist",
-  "bundledWebRuntime": false,
   "server": {
-    "cleartext": true,
     "androidScheme": "https",
     "iosScheme": "https"
   },
   "ios": {
-    "contentInset": "always",
-    "scheme": "wreact",
-    "limitsNavigationsToAppBoundDomains": true
+    "contentInset": "never",
+    "scheme": "WREACT",
+    "limitsNavigationsToAppBoundDomains": true,
+    "backgroundColor": "#0a0f13"
+  },
+  "android": {
+    "backgroundColor": "#0a0f13",
+    "allowMixedContent": false
   },
   "plugins": {
     "SplashScreen": {
-      "launchShowDuration": 1500,
-      "backgroundColor": "#020b1c",
-      "showSpinner": false
-    },
-    "Purchases": {
-      "apiKey": "appl_wreact_shipathon_demo_key"
-    },
-    "Haptics": {
-      "enabled": true
+      "launchShowDuration": 900,
+      "launchAutoHide": false,
+      "backgroundColor": "#0a0f13",
+      "showSpinner": false,
+      "androidSplashResourceName": "splash",
+      "splashFullScreen": true,
+      "splashImmersive": true
     },
     "StatusBar": {
       "style": "DARK",
-      "backgroundColor": "#020b1c"
-    }
+      "backgroundColor": "#0a0f13",
+      "overlaysWebView": true
+    },
+    "Haptics": {},
+    "Share": {}
   }
 }

@@ -1,0 +1,20 @@
+node_modules
+dist
+build
+coverage
+
+# Native projects are built by Xcode / Gradle, never inside the server image.
+ios
+android
+
+.git
+.github
+*.log
+.env*
+!.env.example
+
+# Credentials must never enter an image layer.
+*-firebase-adminsdk-*.json
+service-account*.json
+serviceAccountKey*.json
+AuthKey_*.p8

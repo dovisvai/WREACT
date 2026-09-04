@@ -10,6 +10,8 @@ export type DeviceOS = 'iOS' | 'Android' | 'Web';
 
 export interface ScoreRecord {
   id: string;
+  /** Stable account id. Falls back to username+country when absent (legacy rows). */
+  userId?: string;
   username: string;
   country: string; // ISO 2-letter country code
   scoreMs: number;
@@ -20,13 +22,46 @@ export interface ScoreRecord {
   badge?: string;
 }
 
-export interface CountryStat {
-  country: string;
+/** One nation's position in the World Standings, derived from real scores. */
+export interface CountryStanding {
+  code: string;
   name: string;
   flag: string;
+  /** Mean of every member athlete's personal best. One athlete, one vote. */
   avgMs: number;
-  totalPlayers: number;
+  athleteCount: number;
   bestMs: number;
+  bestAthlete: string;
+  /** False until the country fields MIN_ATHLETES_TO_QUALIFY athletes. */
+  qualified: boolean;
+  athletesNeeded: number;
+  /** null while unqualified. */
+  rank: number | null;
+  /** Positive = climbed since the last snapshot. */
+  rankDelta: number;
+}
+
+/** What a single run did to the player's national average. */
+export interface PlayerContribution {
+  countryCode: string;
+  countryName: string;
+  flag: string;
+  /** Positive = the player made their country faster. */
+  msImprovement: number;
+  newCountryAvgMs: number;
+  isFirstScore: boolean;
+  isNationalBest: boolean;
+  athletesNeeded: number;
+  qualified: boolean;
+}
+
+/** A shared "beat my time" link, decoded from the launch URL. */
+export interface ChallengeInvite {
+  username: string;
+  country: string;
+  avatar: string;
+  scoreMs: number;
+  mode: GameMode;
 }
 
 export interface UserProfile {
@@ -80,21 +115,6 @@ export interface DuelRoomState {
   }[];
   status: 'waiting' | 'countdown' | 'signal' | 'finished';
   signalTime?: number;
-}
-
-export interface FriendUser {
-  id: string;
-  username: string;
-  country: string;
-  avatar: string;
-  bestScore: number;
-  modeScores?: Partial<Record<GameMode, number>>;
-  testsCompleted: number;
-  streakDays: number;
-  verifiedAthlete?: boolean;
-  status: 'online' | 'in_game' | 'offline';
-  lastActive: string;
-  addedAt: number;
 }
 
 export interface LiveTickerEvent {

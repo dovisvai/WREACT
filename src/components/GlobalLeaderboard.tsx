@@ -1,196 +1,168 @@
-import React, { useState } from 'react';
-import { ScoreRecord, GameMode, CountryStat } from '../types';
-import { getCountryFlag, getCountryName, INITIAL_COUNTRY_STATS } from '../utils/countries';
-import { Trophy, Globe, Search, Zap, Award, Flame, Filter } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Search } from 'lucide-react';
+import { GameMode, ScoreRecord } from '../types';
+import { getCountryFlag } from '../utils/countries';
+import { isPlausibleReaction } from '../utils/standings';
+import {
+  EmptyState,
+  Flag,
+  Label,
+  RankBadge,
+  Screen,
+  Segmented,
+  cx,
+} from './ui/Primitives';
 
 interface GlobalLeaderboardProps {
   scores: ScoreRecord[];
   currentMode: GameMode | 'ALL';
   setCurrentMode: (mode: GameMode | 'ALL') => void;
   userCountry: string;
+  username: string;
 }
 
+const MODE_OPTIONS: { value: GameMode | 'ALL'; label: string }[] = [
+  { value: 'ALL', label: 'All' },
+  { value: 'CLASSIC', label: 'Classic' },
+  { value: 'FALSE_ALARM', label: 'Trap' },
+  { value: 'PATTERN_SEQUENCE', label: 'Seq' },
+  { value: 'PRECISION_TARGET', label: 'Target' },
+  { value: 'REVERSE_COLOR', label: 'Stroop' },
+  { value: 'DAILY_CHALLENGE', label: 'Daily' },
+];
+
+/**
+ * Individual athlete rankings.
+ *
+ * Deliberately shows one row per athlete rather than one row per run — a
+ * leaderboard where the same person occupies the top six places is not a
+ * leaderboard.
+ */
 export const GlobalLeaderboard: React.FC<GlobalLeaderboardProps> = ({
   scores,
   currentMode,
   setCurrentMode,
   userCountry,
+  username,
 }) => {
-  const [activeTab, setActiveTab] = useState<'INDIVIDUAL' | 'COUNTRY'>('INDIVIDUAL');
   const [timeframe, setTimeframe] = useState<'ALL' | 'TODAY'>('ALL');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [search, setSearch] = useState('');
 
-  // Filter scores
-  const filteredScores = scores
-    .filter((s) => {
-      if (currentMode !== 'ALL' && s.mode !== currentMode) return false;
-      if (timeframe === 'TODAY' && !s.isDaily && Date.now() - s.timestamp > 86400000) return false;
-      if (searchQuery) {
-        const query = searchQuery.toLowerCase();
-        return s.username.toLowerCase().includes(query) || s.country.toLowerCase().includes(query);
-      }
-      return true;
-    })
-    .sort((a, b) => a.scoreMs - b.scoreMs);
+  const ranked = useMemo(() => {
+    const dayAgo = Date.now() - 86_400_000;
+    const bestByAthlete = new Map<string, ScoreRecord>();
+
+    for (const score of scores) {
+      if (!isPlausibleReaction(score.scoreMs)) continue;
+      if (currentMode !== 'ALL' && score.mode !== currentMode) continue;
+      if (timeframe === 'TODAY' && score.timestamp < dayAgo) continue;
+
+      const key = score.userId || `${score.username}@${score.country}`;
+      const existing = bestByAthlete.get(key);
+      if (!existing || score.scoreMs < existing.scoreMs) bestByAthlete.set(key, score);
+    }
+
+    const query = search.trim().toLowerCase();
+    return Array.from(bestByAthlete.values())
+      .filter(
+        (score) =>
+          !query ||
+          score.username.toLowerCase().includes(query) ||
+          score.country.toLowerCase().includes(query)
+      )
+      .sort((a, b) => a.scoreMs - b.scoreMs)
+      .slice(0, 100);
+  }, [scores, currentMode, timeframe, search]);
 
   return (
-    <div className="flex flex-col h-full bg-[#020b1c] text-white select-none">
-      {/* Top Header Filter */}
-      <div className="bg-[#00122e] border-b border-[#12284c] p-3 space-y-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1 bg-[#020b1c] p-1 rounded-xl border border-[#12284c]">
-            <button
-              onClick={() => setActiveTab('INDIVIDUAL')}
-              className={`flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-black transition-all ${
-                activeTab === 'INDIVIDUAL'
-                  ? 'bg-red-600 text-white shadow-md border border-yellow-400/40'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Trophy className="w-3.5 h-3.5 text-yellow-400" /> Top Athletes
-            </button>
-            <button
-              onClick={() => setActiveTab('COUNTRY')}
-              className={`flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-black transition-all ${
-                activeTab === 'COUNTRY'
-                  ? 'bg-yellow-400 text-slate-950 shadow-md'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Globe className="w-3.5 h-3.5" /> World Cup
-            </button>
+    <Screen className="bg-pitch-900">
+      <div className="sticky top-0 z-10 space-y-3 border-b border-pitch-700 bg-pitch-900/95 px-4 py-3 backdrop-blur">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0 overflow-x-auto no-scrollbar">
+            <Segmented options={MODE_OPTIONS} value={currentMode} onChange={setCurrentMode} />
           </div>
-
-          <div className="flex items-center gap-1 bg-[#020b1c] p-1 rounded-xl border border-[#12284c]">
-            <button
-              onClick={() => setTimeframe('ALL')}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
-                timeframe === 'ALL' ? 'bg-red-600/30 text-yellow-400 border border-yellow-400/30' : 'text-slate-400'
-              }`}
-            >
-              All-Time
-            </button>
-            <button
-              onClick={() => setTimeframe('TODAY')}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
-                timeframe === 'TODAY' ? 'bg-red-600/30 text-yellow-400 border border-yellow-400/30' : 'text-slate-400'
-              }`}
-            >
-              Today
-            </button>
-          </div>
+          <Segmented
+            className="shrink-0"
+            options={[
+              { value: 'ALL', label: 'All time' },
+              { value: 'TODAY', label: '24h' },
+            ]}
+            value={timeframe}
+            onChange={setTimeframe}
+          />
         </div>
 
-        {/* Search Bar */}
         <div className="relative">
-          <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint" />
           <input
             type="text"
-            placeholder="Search athlete or country..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-[#020b1c] border border-[#12284c] rounded-xl pl-9 pr-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-red-500/80"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Find an athlete"
+            className="h-9 w-full rounded-md border border-pitch-700 bg-pitch-850 pl-9 pr-3 text-sm text-ink placeholder:text-ink-faint focus:border-pitch-500 focus:outline-none"
           />
         </div>
       </div>
 
-      {/* Leaderboard List */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        {activeTab === 'INDIVIDUAL' ? (
-          filteredScores.length === 0 ? (
-            <div className="text-center py-12 text-slate-400 text-xs font-medium">
-              No scores matched your filter. Be the first WREACT athlete to set a mark!
-            </div>
-          ) : (
-            filteredScores.map((score, index) => {
+      <div className="px-4 py-4">
+        {ranked.length === 0 ? (
+          <EmptyState
+            title="No times yet"
+            body="Nobody has posted a result matching this filter. Set the mark."
+          />
+        ) : (
+          <div className="space-y-1.5">
+            {ranked.map((score, index) => {
               const rank = index + 1;
-              const flag = getCountryFlag(score.country);
+              const isYou =
+                score.username === username && score.country === userCountry.toUpperCase();
 
               return (
                 <div
                   key={score.id}
-                  className={`flex items-center justify-between p-3 rounded-2xl border transition-all ${
-                    rank === 1
-                      ? 'bg-gradient-to-r from-red-600/20 via-[#00122e] to-[#00122e] border-yellow-400/60 shadow-lg shadow-red-600/10'
-                      : rank === 2
-                      ? 'bg-[#00122e] border-red-500/30'
-                      : rank === 3
-                      ? 'bg-[#00122e] border-[#12284c]'
-                      : 'bg-[#00122e]/60 border-[#12284c]/60'
-                  }`}
+                  className={cx(
+                    'flex items-center gap-3 rounded-md border px-3 py-2.5',
+                    isYou
+                      ? 'border-signal/40 bg-signal/5'
+                      : rank === 1
+                      ? 'border-gold/35 bg-pitch-850'
+                      : 'border-pitch-700 bg-pitch-850'
+                  )}
                 >
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={`w-7 h-7 rounded-xl flex items-center justify-center font-black text-xs shrink-0 ${
-                        rank === 1
-                          ? 'bg-yellow-400 text-slate-950 border border-yellow-300'
-                          : rank === 2
-                          ? 'bg-slate-200 text-slate-950'
-                          : rank === 3
-                          ? 'bg-red-600 text-white'
-                          : 'bg-slate-800 text-slate-300'
-                      }`}
-                    >
-                      {rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `#${rank}`}
-                    </div>
+                  <RankBadge rank={rank} className="w-7 shrink-0" />
+                  <Flag
+                    code={score.country}
+                    emoji={getCountryFlag(score.country)}
+                    className="shrink-0 text-xl"
+                  />
 
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-extrabold text-sm text-slate-100">{score.username}</span>
-                        <span className="text-sm">{flag}</span>
-                        {score.badge && (
-                          <span className="text-[10px] bg-red-600/30 text-yellow-300 px-1.5 py-0.2 rounded font-black border border-yellow-400/40">
-                            {score.badge}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 text-[10px] text-slate-300 font-mono mt-0.5">
-                        <span className="uppercase font-bold">{score.mode.replace('_', ' ')}</span>
-                        <span>•</span>
-                        <span>{score.device}</span>
-                      </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-sm font-semibold text-ink">
+                        {score.username}
+                      </span>
+                      {isYou && <Label className="shrink-0 text-signal">You</Label>}
+                    </div>
+                    <div className="text-[11px] uppercase tracking-wider text-ink-faint">
+                      {score.mode.replace(/_/g, ' ')}
                     </div>
                   </div>
 
-                  <div className="text-right">
-                    <div className="text-lg font-black font-mono text-yellow-400">
-                      {score.scoreMs}<span className="text-xs text-red-500 font-black">ms</span>
-                    </div>
+                  <div
+                    className={cx(
+                      'shrink-0 font-display text-xl font-bold leading-none',
+                      rank === 1 ? 'text-gold' : 'text-ink'
+                    )}
+                  >
+                    {score.scoreMs}
+                    <span className="ml-0.5 text-[11px] font-semibold text-ink-faint">ms</span>
                   </div>
                 </div>
               );
-            })
-          )
-        ) : (
-          /* Country Rankings */
-          INITIAL_COUNTRY_STATS.map((countryStat, index) => (
-            <div
-              key={countryStat.country}
-              className="flex items-center justify-between p-3.5 rounded-2xl bg-[#00122e] border border-[#12284c] hover:border-red-500/40 transition-all"
-            >
-              <div className="flex items-center gap-3">
-                <span className="font-mono text-xs font-black text-yellow-400 w-5">#{index + 1}</span>
-                <span className="text-2xl">{countryStat.flag}</span>
-                <div>
-                  <h4 className="font-extrabold text-sm text-slate-100">{countryStat.name}</h4>
-                  <span className="text-[10px] text-slate-300">
-                    {countryStat.totalPlayers.toLocaleString()} Reaction Athletes
-                  </span>
-                </div>
-              </div>
-
-              <div className="text-right">
-                <div className="text-sm font-black font-mono text-yellow-400">
-                  {countryStat.avgMs}ms <span className="text-[10px] text-slate-300 font-normal">avg</span>
-                </div>
-                <div className="text-[10px] text-slate-300 font-mono">
-                  Best: <span className="text-red-500 font-black">{countryStat.bestMs}ms</span>
-                </div>
-              </div>
-            </div>
-          ))
+            })}
+          </div>
         )}
       </div>
-    </div>
+    </Screen>
   );
 };
