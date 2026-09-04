@@ -18,7 +18,12 @@ export interface ScoreRecord {
   mode: GameMode;
   timestamp: number;
   isDaily?: boolean;
-  device: DeviceOS;
+  /**
+   * Absent on scores rehydrated from Firestore, which does not store it.
+   * Previously defaulted to 'iOS', which put a fabricated value in the public
+   * API for every restored score.
+   */
+  device?: DeviceOS;
   badge?: string;
 }
 

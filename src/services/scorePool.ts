@@ -52,7 +52,8 @@ function toScoreRecord(id: string, data: FirestoreScoreDoc): ScoreRecord {
     scoreMs: Number(data.scoreMs) || 0,
     mode: (data.mode || 'CLASSIC') as ScoreRecord['mode'],
     timestamp: data.createdAt ? Date.parse(data.createdAt) : Date.now(),
-    device: 'iOS',
+    // device is deliberately omitted: Firestore does not store it, and
+    // asserting a platform we do not know would be inventing data.
   };
 }
 
@@ -106,10 +107,18 @@ export function mergeScorePools(
   for (const score of [...remote, ...local]) {
     const identity = `${score.userId || score.username}|${score.scoreMs}|${score.mode}`;
     const existing = byIdentity.get(identity);
-    // Keep the earlier record so timestamps stay closest to the actual run.
-    if (!existing || score.timestamp < existing.timestamp) {
+    if (!existing) {
       byIdentity.set(identity, score);
+      continue;
     }
+
+    // Keep the earlier record so timestamps stay closest to the actual run, but
+    // carry over any field the winner lacks. Firestore does not store `device`,
+    // so without this the durable copy would erase the platform the live
+    // submission actually reported.
+    const earlier = score.timestamp < existing.timestamp ? score : existing;
+    const other = earlier === score ? existing : score;
+    byIdentity.set(identity, { ...earlier, device: earlier.device ?? other.device });
   }
 
   return Array.from(byIdentity.values());

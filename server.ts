@@ -2,7 +2,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import http from 'http';
 import path from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
-import { ScoreRecord, DailyChallengeInfo, GameMode, LiveTickerEvent } from './src/types.js';
+import { ScoreRecord, DailyChallengeInfo, GameMode, LiveTickerEvent, DeviceOS } from './src/types.js';
 import {
   computeStandings,
   snapshotRanks,
@@ -22,6 +22,17 @@ import { isRestrictedCountry } from './src/utils/restrictedCountries.js';
 import { verifyFirebaseTokenCached, bearerFrom } from './src/services/verifyToken.js';
 import { generateDevScores } from './src/utils/devSeed.js';
 import { buildDailyChallenge, dayKey } from './src/utils/dailyChallenge.js';
+
+/**
+ * Accept a device only if the client named one we recognise.
+ *
+ * This is an untrusted client field, so it gets the same treatment as country
+ * and username. Returning undefined for anything else is deliberate: an unknown
+ * platform must stay unknown rather than be defaulted to a real-looking one.
+ */
+function sanitizeDevice(value: unknown): DeviceOS | undefined {
+  return value === 'iOS' || value === 'Android' || value === 'Web' ? value : undefined;
+}
 
 const app = express();
 
@@ -627,7 +638,7 @@ wss.on('connection', (ws, req) => {
             scoreMs: Math.round(scoreMs),
             mode: mode || 'CLASSIC',
             timestamp: Date.now(),
-            device: device || 'iOS',
+            device: sanitizeDevice(device),
             isDaily: !!isDaily
           };
 
@@ -868,7 +879,7 @@ app.post('/api/score', async (req, res) => {
     scoreMs: Math.round(scoreMs),
     mode: mode || 'CLASSIC',
     timestamp: Date.now(),
-    device: device || 'iOS',
+    device: sanitizeDevice(device),
     isDaily: !!isDaily
   };
 
