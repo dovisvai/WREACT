@@ -839,9 +839,12 @@ wss.on('connection', (ws, req) => {
           }))
         };
 
+        // Each client is told which slot is its own. Matching on username in
+        // the client broke as soon as two players shared a name, and the id is
+        // now bound to the socket anyway.
         room.players.forEach((p) => {
           if (p.ws.readyState === WebSocket.OPEN) {
-            p.ws.send(JSON.stringify({ type: 'DUEL_STATE', room: roomState }));
+            p.ws.send(JSON.stringify({ type: 'DUEL_STATE', room: roomState, youAre: p.id }));
           }
         });
 

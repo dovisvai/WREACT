@@ -5,6 +5,7 @@ import { isPlausibleReaction } from '../utils/standings';
 import { playSignalSound, playClickSound, playFanfareSound } from '../utils/audio';
 import { haptic } from '../services/native';
 import { wsUrl } from '../services/api';
+import { getIdToken } from '../services/firebase';
 import { Button, Flag, Label, Panel, cx } from './ui/Primitives';
 
 interface LiveDuelLobbyProps {
@@ -36,6 +37,8 @@ export const LiveDuelLobby: React.FC<LiveDuelLobbyProps> = ({
   const [players, setPlayers] = useState<DuelPlayerState[]>([]);
   const [countdown, setCountdown] = useState(3);
   const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
+  /** Why matchmaking stopped, when it did. Empty in the normal case. */
+  const [notice, setNotice] = useState<string | null>(null);
 
   const socketRef = useRef<WebSocket | null>(null);
 
@@ -49,11 +52,43 @@ export const LiveDuelLobby: React.FC<LiveDuelLobbyProps> = ({
   const signalAtRef = useRef<number>(0);
   const tappedRef = useRef(false);
 
-  useEffect(() => {
-    const ws = new WebSocket(wsUrl());
-    socketRef.current = ws;
+  // Read inside the socket handlers without making the socket depend on it.
+  // With audioEnabled in the dependency array, toggling mute tore the duel
+  // socket down mid-countdown: the server lost the room, no signal arrived,
+  // and the screen sat on "Get ready" forever.
+  const audioRef = useRef(audioEnabled);
+  audioRef.current = audioEnabled;
 
-    ws.onmessage = (e) => {
+  useEffect(() => {
+    let disposed = false;
+    let retry: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+
+    const connect = () => {
+      if (disposed) return;
+      const ws = new WebSocket(wsUrl());
+      socketRef.current = ws;
+
+      // Duels require a verified identity, exactly like score submission. This
+      // socket is separate from the live-data one and has to prove itself too.
+      ws.onopen = () => {
+        attempt = 0;
+        getIdToken().then((token) => {
+          if (token && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'AUTH', token }));
+          }
+        });
+      };
+
+      ws.onclose = () => {
+        if (disposed || socketRef.current !== ws) return;
+        socketRef.current = null;
+        const delay = Math.min(15_000, 1_000 * 2 ** attempt);
+        attempt += 1;
+        retry = setTimeout(connect, delay);
+      };
+
+      ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
 
@@ -61,23 +96,44 @@ export const LiveDuelLobby: React.FC<LiveDuelLobbyProps> = ({
           setRoomCode(data.room.roomId);
           setPlayers(data.room.players);
           setStatus('MATCHED');
-          const me = data.room.players.find(
-            (p: DuelPlayerState) => p.username === username
+          setNotice(null);
+          // The server names our slot; matching on username collided whenever
+          // two players shared a name.
+          if (data.youAre) setMyPlayerId(data.youAre);
+        }
+
+        if (data.type === 'DUEL_REJECTED') {
+          setStatus('IDLE');
+          setNotice(
+            data.reason === 'rate_limited'
+              ? 'Too many duels just now. Give it a minute.'
+              : 'Could not join a duel. Check your connection and try again.'
           );
-          if (me) setMyPlayerId(me.id);
+        }
+
+        if (data.type === 'DUEL_ABANDONED') {
+          setStatus('IDLE');
+          setRoomCode(null);
+          setPlayers([]);
+          setMyPlayerId(null);
+          setNotice(
+            data.reason === 'opponent_left'
+              ? 'Your opponent left. Find another.'
+              : 'That duel timed out. Try again.'
+          );
         }
 
         if (data.type === 'DUEL_COUNTDOWN') {
           setStatus('COUNTDOWN');
           setCountdown(data.seconds);
           tappedRef.current = false;
-          if (audioEnabled) playClickSound();
+          if (audioRef.current) playClickSound();
         }
 
         if (data.type === 'DUEL_SIGNAL') {
           signalAtRef.current = performance.now();
           setStatus('SIGNAL');
-          if (audioEnabled) playSignalSound();
+          if (audioRef.current) playSignalSound();
           haptic.signal();
         }
 
@@ -95,23 +151,39 @@ export const LiveDuelLobby: React.FC<LiveDuelLobbyProps> = ({
         if (data.type === 'DUEL_RESULT') {
           setPlayers(data.players);
           setStatus('FINISHED');
-          if (audioEnabled) playFanfareSound();
+          if (audioRef.current) playFanfareSound();
           haptic.success();
         }
       } catch (err) {
         console.error('WS parse error in duel', err);
       }
+      };
     };
 
-    return () => ws.close();
-  }, [username, audioEnabled]);
+    connect();
+
+    return () => {
+      disposed = true;
+      if (retry) clearTimeout(retry);
+      socketRef.current?.close();
+      socketRef.current = null;
+    };
+  }, [username]);
 
   const startMatchmaking = () => {
+    const ws = socketRef.current;
+    // send() on a socket still CONNECTING throws, and on a closed one silently
+    // discards -- either way the old code had already set SEARCHING, so the
+    // spinner ran forever. Both are routine on a phone.
+    if (ws?.readyState !== WebSocket.OPEN) {
+      setStatus('IDLE');
+      setNotice('Still connecting — try again in a moment.');
+      return;
+    }
+    setNotice(null);
     setStatus('SEARCHING');
     haptic.medium();
-    socketRef.current?.send(
-      JSON.stringify({ type: 'JOIN_DUEL', payload: { username, country, avatar } })
-    );
+    ws.send(JSON.stringify({ type: 'JOIN_DUEL', payload: { username, country, avatar } }));
   };
 
   const handleDuelTap = () => {
@@ -120,13 +192,17 @@ export const LiveDuelLobby: React.FC<LiveDuelLobbyProps> = ({
 
     const measured = Math.round(performance.now() - signalAtRef.current);
 
-    socketRef.current?.send(
+    const ws = socketRef.current;
+    if (ws?.readyState !== WebSocket.OPEN) return;
+
+    ws.send(
       JSON.stringify({
         type: 'DUEL_TAP',
         payload: {
           roomId: roomCode,
-          playerId: myPlayerId,
-          // Server validates this; it falls back to its own clock if absent.
+          // playerId is deliberately not sent: the server identifies the
+          // tapping player by the socket, because trusting this field let
+          // either player forge the other's result.
           reactionMs: isPlausibleReaction(measured) ? measured : null,
         },
       })
@@ -168,6 +244,15 @@ export const LiveDuelLobby: React.FC<LiveDuelLobbyProps> = ({
             </div>
             <Label>1v1</Label>
           </Panel>
+
+          {notice && (
+            <p
+              role="status"
+              className="mt-5 rounded-md border border-pitch-700 bg-pitch-850 px-3 py-2.5 text-center text-[12px] text-ink-muted"
+            >
+              {notice}
+            </p>
+          )}
 
           <Button variant="signal" size="lg" full className="mt-6" onClick={startMatchmaking}>
             Find an opponent

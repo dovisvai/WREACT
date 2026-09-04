@@ -23,6 +23,10 @@ android/local.properties
 android/captures/
 *.keystore
 !debug.keystore
+# Upload/signing keys and the passwords that unlock them. Losing these means
+# never being able to update the app; committing them means anyone can.
+*.jks
+android/keystore.properties
 
 # Service-account and push credentials.
 # The Firebase service account JSON that OneSignal asks for on Android grants

@@ -1,5 +1,33 @@
 apply plugin: 'com.android.application'
 
+/**
+ * Release signing.
+ *
+ * Play requires an upload key and will permanently associate the app with it,
+ * so the keystore and its passwords must never be committed. They are read from
+ * android/keystore.properties, which is gitignored; without that file the
+ * release build simply falls back to unsigned, so debug builds and CI keep
+ * working for anyone who does not hold the key.
+ *
+ * To create the key (once, and back it up somewhere safe -- losing it means you
+ * can never update the app again):
+ *
+ *   keytool -genkeypair -v -keystore wreact-upload.jks  *     -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+ *
+ * Then write android/keystore.properties:
+ *
+ *   storeFile=../wreact-upload.jks
+ *   storePassword=...
+ *   keyAlias=upload
+ *   keyPassword=...
+ */
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+def keystoreProperties = new Properties()
+def hasReleaseKeystore = keystorePropertiesFile.exists()
+if (hasReleaseKeystore) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 android {
     namespace = "com.wreact.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -16,8 +44,28 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            release {
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (hasReleaseKeystore) {
+                signingConfig signingConfigs.release
+            }
+            // R8 is deliberately off for the first release. Nearly all the
+            // logic here is JavaScript, so the size win is small, while the
+            // reflection-heavy native stack (Capacitor plugin lookup by class
+            // name, the OneSignal Cordova bridge) is where obfuscation breaks
+            // in ways that only show up on a release build. Turn it on for a
+            // later version with its own smoke test.
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
