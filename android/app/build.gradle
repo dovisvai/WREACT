@@ -68,6 +68,16 @@ android {
             // compile time, which is the worst place to find out.
             minifyEnabled true
             shrinkResources true
+
+            // Play warns that the bundle carries native code without debug
+            // symbols. Nothing in this project ships an .so -- the whole app is
+            // a WebView -- so the warning most likely comes from a dependency's
+            // metadata. Emitting the symbol table anyway costs nothing at this
+            // size and means any native crash in OneSignal, RevenueCat or Play
+            // Billing arrives in Console readable rather than as raw addresses.
+            ndk {
+                debugSymbolLevel 'SYMBOL_TABLE'
+            }
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
