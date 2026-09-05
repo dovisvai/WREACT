@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "128438498323",
+    "project_id": "gen-lang-client-0063491611",
+    "storage_bucket": "gen-lang-client-0063491611.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:128438498323:android:e81e751ddf637a20867be6",
+        "android_client_info": {
+          "package_name": "com.wreact.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "128438498323-eriigknunoeg3u32rm5b35j5sqiufmdq.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDXwkwS5I5-mUOWFuS0rTelTqnH-r0aVGc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "128438498323-eriigknunoeg3u32rm5b35j5sqiufmdq.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
