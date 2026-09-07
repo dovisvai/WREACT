@@ -205,7 +205,8 @@ no provider.
 - **Play Integrity is not wired up.** Firebase anonymous accounts are free and unlimited, so five of them can put a small country top of the table. Every other control is intact and it still works. This is the real remaining security hole; it needs the Play Console app (now exists) plus a Google Cloud project and server-side verdict verification. Do it after launch, properly — client-side only would be theatre.
 - **App Links will not verify** unless `wreact.app` is owned and serves `assetlinks.json` with the app signing SHA-256. Until then shared `https://` links open in a browser. The `wreact://` scheme works.
 - **iOS** entirely deferred.
-- Lower-severity audit findings not yet addressed: Trap's decoy gap is a learnable hardcoded 1400ms; Sequence gives no feedback on repeated steps; the contribution panel reasons from the cross-mode best; the share card is labelled with the wrapper mode; FLIP animation measures stale positions after filtering; some `localStorage` writes unguarded; token cache can outlive expiry by 5 min.
+- **All audit findings are now closed.** The last five (Trap's fixed decoy gap, the contribution panel reading the cross-mode best, the share card labelled with the wrapper mode, FLIP keyed on the unfiltered list, unguarded `localStorage` writes) were fixed in `e38b68c`. Sequence's lack of feedback on a repeated step is the only one deliberately left — it needs a visual design decision, not a fix.
+- **Testers are now the critical path.** Play's closed-test requirement for new personal developer accounts gates production, and the leaderboard needs five athletes in one country before it shows anything. Those are two different recruitment problems: the first needs 12 bodies anywhere, the second needs 5 people in the same nation.
 
 ---
 
