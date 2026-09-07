@@ -4,7 +4,7 @@ Living record of where this project actually stands. Updated after each
 completed task, so any session (or person) can pick up without re-deriving
 everything.
 
-**Last updated:** 2026-09-07 · matchday 6 · `bb56b5b`
+**Last updated:** 2026-09-07 · matchday 6 · `22d4abf`
 
 ---
 
@@ -132,6 +132,30 @@ Every item below was verified by execution, not by reading:
 ## 4. Outstanding
 
 Ordered by dependency. Full detail in the launch runbook artifact.
+
+### Open security item — Firebase Android API key
+
+The Android API key from `google-services.json` was committed in `3c1eab2`
+to a public repo and flagged by GitHub secret scanning. The file has been
+removed from version control (`22d4abf`) and gitignored, **but the key
+remains in git history and has already been scanned.**
+
+Removing it does not unpublish it. The fix that matters is in Google Cloud
+Console → APIs & Services → Credentials, on that Android key:
+
+- **Application restrictions** → Android apps → add package `com.wreact.app`
+  with **both** SHA-1 fingerprints (upload and app signing).
+- **API restrictions** → limit to only the APIs the app actually calls.
+- Or regenerate the key in Firebase and download a fresh `google-services.json`.
+
+Context for judging severity: the key grants **no** Firestore data access —
+rules govern that, and they are deployed and emulator-tested. The exposure is
+that an unrestricted Google API key can be used to call other APIs enabled on
+the project, which is a billing risk rather than a data one.
+
+`android/app/google-services.json` is now required on disk but absent from the
+repo, so a new machine or CI runner must place it manually or inject it from a
+secret.
 
 ### Blocking a production release
 
