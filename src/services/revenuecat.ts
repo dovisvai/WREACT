@@ -140,7 +140,7 @@ export const PREVIEW_OFFERING: RevenueCatOfferingData = {
       product: {
         identifier: PRODUCT_IDS.annual,
         title: 'WREACT Pro — Annual',
-        description: 'Everything in Pro, billed yearly. Save 37%.',
+        description: 'Everything in Pro, billed yearly.',
         price: 29.99,
         priceString: '$29.99',
         currencyCode: 'USD',

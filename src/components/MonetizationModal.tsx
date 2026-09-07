@@ -27,6 +27,9 @@ const PRO_BENEFITS = [
 
 type Status = { text: string; tone: 'success' | 'info' | 'error' } | null;
 
+/** Below this, the annual plan is not meaningfully cheaper and no badge shows. */
+const MIN_SAVING_TO_ADVERTISE = 5;
+
 export const MonetizationModal: React.FC<MonetizationModalProps> = ({
   isOpen,
   onClose,
@@ -104,6 +107,37 @@ export const MonetizationModal: React.FC<MonetizationModalProps> = ({
     }
   };
 
+  /**
+   * What the annual plan actually saves against paying monthly for a year.
+   *
+   * Computed from the offering rather than written into the copy, because
+   * RevenueCat returns store-localised prices: Play sets its own rounded price
+   * points per currency, so a figure that is right in USD is wrong almost
+   * everywhere else. Returns null when there is nothing honest to claim — no
+   * monthly plan to compare against, a missing price, or a saving that rounds
+   * to nothing.
+   */
+  const annualSavingPercent = (pkg: RevenueCatPackageInfo): number | null => {
+    if (pkg.packageType !== 'ANNUAL') return null;
+
+    const monthly = offering?.availablePackages.find((p) => p.packageType === 'MONTHLY');
+    const monthlyPrice = monthly?.product.price;
+    const annualPrice = pkg.product.price;
+    if (!monthlyPrice || !annualPrice) return null;
+
+    // Compare like with like: a year of the monthly plan against the annual one.
+    const yearAtMonthlyRate = monthlyPrice * 12;
+    if (annualPrice >= yearAtMonthlyRate) return null;
+
+    // Floor, never round: this is a price claim, so it must never overstate.
+    // Rounding turned a 0.6% difference into a gold "SAVE 1%" badge.
+    const percent = Math.floor((1 - annualPrice / yearAtMonthlyRate) * 100);
+
+    // And below a few points there is nothing worth shouting about — a badge
+    // promising a 3% saving reads as a worse deal than no badge at all.
+    return percent >= MIN_SAVING_TO_ADVERTISE ? percent : null;
+  };
+
   const priceLine = (pkg: RevenueCatPackageInfo): string => {
     // WREACT sells no lifetime product, but the SDK's package type union
     // includes one and the offering comes from a dashboard we do not control at
@@ -168,7 +202,7 @@ export const MonetizationModal: React.FC<MonetizationModalProps> = ({
               <div className="mt-5 space-y-2">
                 {offering.availablePackages.map((pkg) => {
                   const isSelected = pkg.identifier === selected?.identifier;
-                  const isBestValue = pkg.packageType === 'ANNUAL';
+                  const saving = annualSavingPercent(pkg);
 
                   return (
                     <button
@@ -190,9 +224,9 @@ export const MonetizationModal: React.FC<MonetizationModalProps> = ({
                           <span className="text-[13px] font-semibold text-ink">
                             {pkg.product.title}
                           </span>
-                          {isBestValue && (
+                          {saving !== null && (
                             <span className="rounded-xs bg-gold/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-gold">
-                              Best value
+                              Save {saving}%
                             </span>
                           )}
                         </div>
