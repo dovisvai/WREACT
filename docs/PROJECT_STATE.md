@@ -74,7 +74,7 @@ silently never appears.
 ### Launch progress
 
 - [x] **Signing key created and verified.** `jar verified`, `CN=dovidas.vaivada`, valid to 2054.
-- [x] **Firebase Android app registered.** `google-services.json` committed; `processReleaseGoogleServices` confirmed generating `google_app_id` into the bundle.
+- [x] **Firebase Android app registered.** `google-services.json` present on disk and gitignored; `processReleaseGoogleServices` confirmed generating `google_app_id` into the bundle.
 - [x] **Anonymous auth confirmed working** — evidenced by scores in Firestore under real uids, not by checking a toggle.
 - [x] **Play Console app created**, Play App Signing accepted.
 - [x] **Internal testing release published** — `1.0 — internal test 1`, versionCode 1.
