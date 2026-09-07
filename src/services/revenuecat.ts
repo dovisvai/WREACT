@@ -17,7 +17,16 @@ import { isNative, platform } from './native';
  * mode to a user as a completed purchase.
  */
 
-export const REVENUECAT_ENTITLEMENT_ID = 'pro_access';
+/**
+ * Must match the entitlement identifier in the RevenueCat dashboard exactly.
+ *
+ * This is the one string in the purchase flow that has to agree with the
+ * dashboard: a mismatch lets the purchase succeed and the entitlement never
+ * activate, so the player is charged and stays on the free tier. Product ids
+ * do not need to match anything here — the live path maps whatever the store
+ * returns, and PRODUCT_IDS below only builds the offline preview catalogue.
+ */
+export const REVENUECAT_ENTITLEMENT_ID = 'wreact_pro';
 
 /* ---------------------------------------------------------------------------
  * API keys.

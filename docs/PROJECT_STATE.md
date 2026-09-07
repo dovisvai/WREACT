@@ -52,7 +52,10 @@ Upload key SHA-1: `30:20:AF:D7:D3:DE:19:73:05:CA:70:FF:B7:89:BC:15:F0:F9:7B:F9`
 Literal strings in `src/services/revenuecat.ts` — a mismatch means the product
 silently never appears.
 
-- Entitlement: `pro_access`
+- Entitlement: `wreact_pro` — **must match the dashboard exactly**; a mismatch
+  charges the player and never activates Pro. Product ids do **not** need to
+  match the code: the live path maps whatever the store returns, and
+  `PRODUCT_IDS` only builds the offline preview catalogue.
 - `wreact_pro_monthly_399` — $3.99/mo, 3-day trial
 - `wreact_pro_annual_2999` — $29.99/yr
 
@@ -190,7 +193,7 @@ no provider.
 ### Blocking a production release
 
 1. **Create the three products** in Play Console → Monetise. Unblocked by the internal upload.
-2. **RevenueCat**: project, connect Play (service-account JSON), entitlement `pro_access`, offering marked Current, copy `goog_` key → `.env` → **rebuild**.
+2. **RevenueCat**: project, connect Play (service-account JSON), entitlement `wreact_pro`, offering marked Current, copy `goog_` key → `.env` → **rebuild**.
 3. **OneSignal**: upload the Firebase service-account JSON for FCM, then build the five campaigns defined in `src/services/push.ts`.
 4. **Store assets**: 512×512 icon, 1024×500 feature graphic, phone screenshots.
 5. **Publicly hosted privacy policy URL** + a separate web-accessible account-deletion request URL.
