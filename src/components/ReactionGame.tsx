@@ -22,6 +22,7 @@ import { AlertTriangle, Eye, RefreshCw, RotateCcw, Target, Trophy, Zap } from 'l
 import confetti from 'canvas-confetti';
 import { Button, Label, cx } from './ui/Primitives';
 import { IdleScreen, ResultScreen } from './game/ReactionScreens';
+import { safeSetItem } from '../utils/storage';
 
 interface ReactionGameProps {
   mode: GameMode;
@@ -173,12 +174,31 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
    */
   const startClockAfterPaint = useCallback(() => {
     signalPaintedRef.current = false;
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        startTimeRef.current = performance.now();
-        signalPaintedRef.current = true;
-      });
-    });
+
+    let stamped = false;
+    const stamp = () => {
+      if (stamped) return;
+      stamped = true;
+      startTimeRef.current = performance.now();
+      signalPaintedRef.current = true;
+    };
+
+    requestAnimationFrame(() => requestAnimationFrame(stamp));
+
+    /**
+     * Fallback, because rAF does not fire while the WebView is hidden.
+     *
+     * Background the app in the two frames between entering SIGNAL and the
+     * stamp and the callbacks never run, so the clock never starts -- and the
+     * tap guard, which exists to ignore pre-paint taps, then rejects every tap
+     * for the rest of the round. The round becomes unfinishable: the screen
+     * sits green and nothing the player does ends it.
+     *
+     * Timers still fire in that state, so this always closes the round. 250ms
+     * is far longer than the two frames the rAF path needs, so on the normal
+     * path rAF always wins and the timing is unaffected.
+     */
+    setTimeout(stamp, 250);
   }, []);
 
   const triggerSignal = useCallback(() => {
@@ -231,7 +251,10 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
       timerRef.current = setTimeout(() => {
         setTestState('TRAP_WARNING');
         if (audioEnabled) playErrorSound();
-        timerRef.current = setTimeout(triggerSignal, 1400);
+        // Randomised like every other delay here. A fixed gap can be counted:
+        // wait for the decoy, count 1.4s, tap — and the mode that exists to
+        // punish anticipation rewards it instead.
+        timerRef.current = setTimeout(triggerSignal, 900 + Math.random() * 1100);
       }, 1200 + Math.random() * 1000);
       return;
     }
@@ -274,7 +297,7 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
 
       if (!personalBest || ms < personalBest) {
         setPersonalBest(ms);
-        localStorage.setItem(`pb_${playMode}`, String(ms));
+        safeSetItem(`pb_${playMode}`, String(ms));
         if (audioEnabled) playFanfareSound();
         try {
           confetti({
@@ -597,7 +620,7 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
             standings={standings}
             challenge={settledChallenge}
             onRetry={startTest}
-            onShare={() => openShareModal(reactionTime, mode)}
+            onShare={() => openShareModal(reactionTime, playMode ?? mode)}
           />
         )}
       </div>

@@ -6,6 +6,7 @@ import { initNativeShell, onDeepLink } from '../services/native';
 import { revenueCat, isProActive } from '../services/revenuecat';
 import { initPush } from '../services/push';
 import { currentUserId, fetchAthleteProfile } from '../services/firebase';
+import { safeSetItem } from '../utils/storage';
 
 interface AppBootOptions {
   setUserProfile: Dispatch<SetStateAction<UserProfile>>;
@@ -61,7 +62,7 @@ export function useAppBoot({
       setUserProfile((prev) => {
         if (prev.id === uid) return prev;
         const next = { ...prev, id: uid };
-        localStorage.setItem('world_reaction_user', JSON.stringify(next));
+        safeSetItem('world_reaction_user', JSON.stringify(next));
         return next;
       });
 
@@ -105,12 +106,7 @@ export function useAppBoot({
             new Set([...(prev.unlockedBadges || []), ...(remote.unlockedBadges || [])])
           );
           merged.proPassActive = Boolean(prev.proPassActive || remote.proPassActive);
-
-          try {
-            localStorage.setItem('world_reaction_user', JSON.stringify(merged));
-          } catch {
-            /* storage may be full or unavailable; state is still correct */
-          }
+          safeSetItem('world_reaction_user', JSON.stringify(merged));
           return merged;
         });
       }
@@ -130,7 +126,7 @@ export function useAppBoot({
           const active = isProActive(state);
           if (prev.proPassActive === active) return prev;
           const next = { ...prev, proPassActive: active };
-          localStorage.setItem('world_reaction_user', JSON.stringify(next));
+          safeSetItem('world_reaction_user', JSON.stringify(next));
           return next;
         });
       });

@@ -6,6 +6,7 @@ import {
   type CustomerInfo,
 } from '@revenuecat/purchases-capacitor';
 import { isNative, platform } from './native';
+import { safeSetItem } from '../utils/storage';
 
 /**
  * RevenueCat integration.
@@ -320,7 +321,7 @@ class RevenueCatService {
       }
 
       // Browser preview only, so the paywall and Pro states stay testable.
-      localStorage.setItem('wreact_preview_pro', 'true');
+      safeSetItem('wreact_preview_pro', 'true');
       return { success: true, cancelled: false, customerInfo: this.previewCustomerState() };
     }
 

@@ -42,6 +42,7 @@ import {
 } from './services/firebase';
 import { useLiveData } from './hooks/useLiveData';
 import { useAppBoot } from './hooks/useAppBoot';
+import { safeSetItem } from './utils/storage';
 
 function detectDevice(): DeviceOS {
   const p = platform();
@@ -66,7 +67,7 @@ export default function App() {
   const handleSetAudioEnabled = (val: boolean) => {
     setAudioEnabled(val);
     setGlobalAudioMuted(!val);
-    localStorage.setItem('wreact_audio_enabled', String(val));
+    safeSetItem('wreact_audio_enabled', String(val));
   };
 
   const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(() => {
@@ -154,7 +155,8 @@ export default function App() {
   const saveUserProfile = useCallback((updated: Partial<UserProfile>) => {
     setUserProfile((prev) => {
       const next = { ...prev, ...updated };
-      localStorage.setItem('world_reaction_user', JSON.stringify(next));
+      // Inside a state updater: a throw here would take the render with it.
+      safeSetItem('world_reaction_user', JSON.stringify(next));
       syncUserProfileToFirebase(next);
       return next;
     });
@@ -215,7 +217,7 @@ export default function App() {
 
   const handleOnboardingComplete = (updatedProfile: Partial<UserProfile>) => {
     saveUserProfile(updatedProfile);
-    localStorage.setItem('wreact_onboarded', 'true');
+    safeSetItem('wreact_onboarded', 'true');
     setIsOnboardingOpen(false);
   };
 
@@ -231,7 +233,24 @@ export default function App() {
       // successful runs and reset the streak the next day.
       if (!isPlausibleForMode(scoreMs, mode)) return;
 
-      const previousBest = userProfile.bestScore > 0 ? userProfile.bestScore : null;
+      /**
+       * The best for *this* discipline, not the best overall.
+       *
+       * `userProfile.bestScore` is written by every mode, so a fast Trap run
+       * became the number a Classic contribution was compared against — and the
+       * panel then told the player their Classic best "still stands" at a time
+       * they had never posted in Classic. The standings themselves were always
+       * right; only the sentence explaining them was wrong.
+       */
+      const previousBest = (() => {
+        try {
+          const perMode = Number.parseInt(localStorage.getItem(`pb_${mode}`) ?? '', 10);
+          if (isPlausibleForMode(perMode, mode)) return perMode;
+        } catch {
+          /* storage unavailable; fall through */
+        }
+        return null;
+      })();
 
       // Only the ranked mode moves a national average, so only the ranked mode
       // gets a contribution line. Showing one for a Stroop run would promise an

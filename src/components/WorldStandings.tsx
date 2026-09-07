@@ -103,7 +103,11 @@ export const WorldStandings: React.FC<WorldStandingsProps> = ({
 
   const tableRef = useRef<HTMLDivElement>(null);
   // Re-measure whenever the ordering could have changed.
-  useFlipRows(tableRef, standings.map((s) => s.code).join(','));
+  // Keyed on what is actually rendered. Keying on the unfiltered standings
+  // meant that after picking a continent or typing a search, the remembered row
+  // positions belonged to a different list — so the next reorder animated every
+  // visible row in from hundreds of pixels away.
+  useFlipRows(tableRef, ranked.map((s) => s.code).join(','));
 
   const handleRecruit = async () => {
     await haptic.light();
