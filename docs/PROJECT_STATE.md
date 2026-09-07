@@ -78,6 +78,14 @@ silently never appears.
 - [x] **Anonymous auth confirmed working** — evidenced by scores in Firestore under real uids, not by checking a toggle.
 - [x] **Play Console app created**, Play App Signing accepted.
 - [x] **Internal testing release published** — `1.0 — internal test 1`, versionCode 1.
+  - **Caveat:** that build predates the client-side token refresh (`86b02d3`). The
+    server now expires socket identity after an hour, and versionCode 1
+    authenticates on connect only and ignores `REAUTH_REQUIRED` — so a session
+    kept continuously open past an hour stops posting scores until the socket
+    reconnects. Backgrounding and returning fixes it, and the heartbeat drops
+    dead sockets, so it is rare in practice. If a tester reports scores silently
+    stopping, this is why. Fixed in the next build, which RevenueCat requires
+    regardless.
 - [x] **Firestore rules deployed and emulator-tested.**
 
 ### Code — fixed and verified this cycle
