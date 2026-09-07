@@ -96,10 +96,18 @@ export interface RevenueCatCustomerState {
  * what to create in App Store Connect / Play Console.
  * ------------------------------------------------------------------------- */
 
+/**
+ * Two products, both subscriptions.
+ *
+ * A lifetime one-time purchase was dropped: Play models a non-consumable
+ * "buy once, keep forever" entitlement awkwardly next to subscriptions, and
+ * carrying a third option that is fiddly to configure and rarely chosen is
+ * not worth the paywall real estate or the support surface. Monthly and
+ * annual cover the same intent — try it, or commit for a year.
+ */
 export const PRODUCT_IDS = {
   monthly: 'wreact_pro_monthly_399',
   annual: 'wreact_pro_annual_2999',
-  lifetime: 'wreact_founder_lifetime_4999',
 } as const;
 
 export const PREVIEW_OFFERING: RevenueCatOfferingData = {
@@ -135,18 +143,6 @@ export const PREVIEW_OFFERING: RevenueCatOfferingData = {
         description: 'Everything in Pro, billed yearly. Save 37%.',
         price: 29.99,
         priceString: '$29.99',
-        currencyCode: 'USD',
-      },
-    },
-    {
-      identifier: '$rc_lifetime',
-      packageType: 'LIFETIME',
-      product: {
-        identifier: PRODUCT_IDS.lifetime,
-        title: 'WREACT Founder — Lifetime',
-        description: 'One payment, permanent Pro, and a founder mark beside your name.',
-        price: 49.99,
-        priceString: '$49.99',
         currencyCode: 'USD',
       },
     },

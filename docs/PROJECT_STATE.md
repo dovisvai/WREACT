@@ -55,7 +55,11 @@ silently never appears.
 - Entitlement: `pro_access`
 - `wreact_pro_monthly_399` — $3.99/mo, 3-day trial
 - `wreact_pro_annual_2999` — $29.99/yr
-- `wreact_founder_lifetime_4999` — $49.99 one-time
+
+A lifetime one-time purchase was dropped on 2026-09-07. Play models a
+non-consumable entitlement awkwardly beside subscriptions and it was proving
+fiddly to configure; two options cover the same intent. Nothing to create in
+Console beyond these two subscriptions.
 
 ### Build-time env (Vite inlines these — must be right *before* building)
 

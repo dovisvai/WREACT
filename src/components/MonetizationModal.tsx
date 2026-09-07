@@ -105,6 +105,9 @@ export const MonetizationModal: React.FC<MonetizationModalProps> = ({
   };
 
   const priceLine = (pkg: RevenueCatPackageInfo): string => {
+    // WREACT sells no lifetime product, but the SDK's package type union
+    // includes one and the offering comes from a dashboard we do not control at
+    // runtime -- so label it correctly rather than calling it "per month".
     if (pkg.packageType === 'LIFETIME') return 'one time';
     if (pkg.packageType === 'ANNUAL') return 'per year';
     return 'per month';
