@@ -102,6 +102,19 @@ export const LiveDuelLobby: React.FC<LiveDuelLobbyProps> = ({
           if (data.youAre) setMyPlayerId(data.youAre);
         }
 
+        // Same credential lifecycle as the live-data socket: this one is
+        // separate and expires independently.
+        if (data.type === 'REAUTH_REQUIRED') {
+          const live = socketRef.current;
+          if (live && live.readyState === WebSocket.OPEN) {
+            getIdToken().then((token) => {
+              if (token && live.readyState === WebSocket.OPEN) {
+                live.send(JSON.stringify({ type: 'AUTH', token }));
+              }
+            });
+          }
+        }
+
         if (data.type === 'DUEL_REJECTED') {
           setStatus('IDLE');
           setNotice(

@@ -4,7 +4,7 @@ Living record of where this project actually stands. Updated after each
 completed task, so any session (or person) can pick up without re-deriving
 everything.
 
-**Last updated:** 2026-09-07 · matchday 6 · `22d4abf`
+**Last updated:** 2026-09-07 · matchday 6 · token lifecycle hardened
 
 ---
 
@@ -114,6 +114,14 @@ Every item below was verified by execution, not by reading:
 - Sub-80ms results destroyed the stored personal best.
 - Daily event date showed a day early for everyone west of UTC.
 
+**Token lifecycle** (server + client)
+- Verification cache no longer outlives the token. It used a flat five-minute TTL from verification, so a token checked thirty seconds before expiry stayed accepted four and a half minutes after Google considered it dead. Capped at `min(cache window, token exp)`.
+- Cache keys are a SHA-256 of the token rather than the JWT itself — the map previously held thousands of live credentials in plain memory, readable from a heap dump or crash log.
+- Eviction is incremental; `clear()` at the ceiling dropped all 5000 entries at once and caused a re-verification stampede exactly when busiest.
+- 5s clock tolerance, so NTP drift does not reject otherwise-valid tokens.
+- **Socket identity now expires with its token.** A socket proved itself once and was trusted for the life of the connection — hours — while the credential behind it lives one hour, so a deleted or revoked account kept full privileges as long as it held the socket open. Applies to scores and both duel handlers.
+- Clients re-authenticate five minutes ahead of expiry, and on a `REAUTH_REQUIRED` push, so a player's score is never rejected for a credential that aged out between rounds. Both sockets (live data and duel lobby) do this independently.
+
 **Client robustness**
 - WebSocket reconnect with backoff (there was none — first drop stranded the app for the session).
 - CORS preflight omitted `Authorization`, so the REST fallback was blocked.
@@ -133,29 +141,39 @@ Every item below was verified by execution, not by reading:
 
 Ordered by dependency. Full detail in the launch runbook artifact.
 
-### Open security item — Firebase Android API key
+### Credentials — resolved and remaining
 
-The Android API key from `google-services.json` was committed in `3c1eab2`
-to a public repo and flagged by GitHub secret scanning. The file has been
-removed from version control (`22d4abf`) and gitignored, **but the key
-remains in git history and has already been scanned.**
-
-Removing it does not unpublish it. The fix that matters is in Google Cloud
-Console → APIs & Services → Credentials, on that Android key:
-
-- **Application restrictions** → Android apps → add package `com.wreact.app`
-  with **both** SHA-1 fingerprints (upload and app signing).
-- **API restrictions** → limit to only the APIs the app actually calls.
-- Or regenerate the key in Firebase and download a fresh `google-services.json`.
-
-Context for judging severity: the key grants **no** Firestore data access —
-rules govern that, and they are deployed and emulator-tested. The exposure is
-that an unrestricted Google API key can be used to call other APIs enabled on
-the project, which is a billing risk rather than a data one.
+**Android API key — resolved.** Committed in `3c1eab2` to a public repo, flagged
+by GitHub secret scanning, removed in `22d4abf` and gitignored. Removing it did
+not unpublish it (it is in history and was scanned), so the key was restricted
+in Cloud Console instead. **Verified**: an off-app request now returns
+`403 PERMISSION_DENIED — Requests from this Android client application <empty>
+are blocked`. The GitHub alert can be dismissed.
 
 `android/app/google-services.json` is now required on disk but absent from the
 repo, so a new machine or CI runner must place it manually or inject it from a
 secret.
+
+**Web API key — public and unrestricted, by design and unresolved.** It lives in
+`firebase-applet-config.json`, committed since `b04b77b`, and is the key the app
+actually authenticates with. Verified still working after the Android
+restriction. This is not the same mistake: Firebase web keys are meant to ship
+in client bundles, and the protection is Firestore rules rather than secrecy.
+Referrer restriction is not practical here because the Capacitor WebView's
+origin is `https://localhost`.
+
+The proper control is **Firebase App Check**, which pairs with the deferred Play
+Integrity work — same attestation, and it is what would stop someone minting
+anonymous accounts against the project from a script. Both need the Play Console
+app, which now exists. Do it after launch; the exposure is abuse and billing,
+not data.
+
+**Stray anonymous account.** One anonymous user exists in Firebase with no
+scores, created accidentally on 2026-09-07 while probing whether the web key
+still worked — `accounts:signUp` with an empty body succeeds rather than merely
+validating the key. Harmless (no times, cannot affect standings). Remove via
+Firebase Console → Authentication → Users if wanted; it is the newest entry with
+no provider.
 
 ### Blocking a production release
 
@@ -213,6 +231,9 @@ What was actually exercised, so nothing gets re-claimed on the strength of a cod
 | Scroll affordance | Pixel luma at both edges, both scroll positions |
 | Deep-link validation | Ran the parser over hostile tokens — caught that `RU` still passed |
 | Bundle is genuinely signed | `jarsigner -verify` → `jar verified` |
+| Android key restricted | Live call → `403 PERMISSION_DENIED`, blocked |
+| Web key still works | Live call accepted (created one stray anonymous user) |
+| Auth gate after token changes | Bad token → `AUTH_RESULT ok=false`, then `REAUTH_REQUIRED` + rejection on both scores and duels |
 | FCM config in the bundle | `google_app_id` present in generated resources |
 
 **Not verified:** the release build's UI on a woken screen (display would not wake over adb); push delivery (no FCM credential yet); a real purchase (no products yet).

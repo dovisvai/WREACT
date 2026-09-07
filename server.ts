@@ -255,9 +255,34 @@ interface SocketState {
   unauthAttempts: number;
   /** Heartbeat liveness: cleared on each ping, set by the client's pong. */
   alive: boolean;
+  /**
+   * When the token this socket authenticated with expires.
+   *
+   * A socket proves identity once and can then stay open for hours, while a
+   * Firebase ID token lives one hour -- so without this a connection kept its
+   * privileges long after the credential behind them had died, and a deleted
+   * account could keep submitting for as long as it held the socket open.
+   */
+  authExpiresAtMs: number;
 }
 
 const socketState = new WeakMap<WebSocket, SocketState>();
+
+/**
+ * The verified identity on this socket, or null if it never had one or the
+ * token behind it has since expired.
+ */
+function authedUid(ws: WebSocket): string | null {
+  const state = socketState.get(ws);
+  if (!state?.uid) return null;
+  if (state.authExpiresAtMs <= Date.now()) {
+    // Drop the identity rather than carry a dead credential forward.
+    state.uid = null;
+    state.authExpiresAtMs = 0;
+    return null;
+  }
+  return state.uid;
+}
 
 /** Cheap per-socket flood guard, independent of score rate limiting. */
 function allowMessage(ws: WebSocket): boolean {
@@ -661,6 +686,7 @@ wss.on('connection', (ws, req) => {
     windowResetAt: Date.now() + 10_000,
     unauthAttempts: 0,
     alive: true,
+    authExpiresAtMs: 0,
   });
 
   ws.send(initStatePayload());
@@ -686,8 +712,20 @@ wss.on('connection', (ws, req) => {
       if (data.type === 'AUTH') {
         const user = await verifyFirebaseTokenCached(data.token);
         const state = socketState.get(ws);
-        if (state) state.uid = user?.uid ?? null;
-        ws.send(JSON.stringify({ type: 'AUTH_RESULT', ok: Boolean(user) }));
+        if (state) {
+          state.uid = user?.uid ?? null;
+          state.authExpiresAtMs = user?.expiresAtMs ?? 0;
+          if (user) state.unauthAttempts = 0;
+        }
+        ws.send(
+          JSON.stringify({
+            type: 'AUTH_RESULT',
+            ok: Boolean(user),
+            // Handed back so the client can refresh ahead of expiry rather
+            // than discovering it mid-submission.
+            expiresAtMs: user?.expiresAtMs ?? 0,
+          })
+        );
         return;
       }
 
@@ -697,7 +735,15 @@ wss.on('connection', (ws, req) => {
         // Identity comes from the verified token, never from the payload.
         // Without this the standings can be forged by anyone who can open a
         // socket, which is the whole product.
-        if (!state?.uid) {
+        const authedId = authedUid(ws);
+        if (!authedId) {
+          // A socket whose token merely aged out is not an attacker. Ask it to
+          // re-prove itself instead of counting it toward the flood limit, and
+          // let the client refresh silently.
+          if (state && state.authExpiresAtMs === 0 && state.uid === null) {
+            ws.send(JSON.stringify({ type: 'REAUTH_REQUIRED' }));
+          }
+
           // Answer the first few, then hang up. Replying to every frame of a
           // flood means serializing a response per message, which is exactly
           // the work an attacker wants us doing — a disconnect costs us one
@@ -711,12 +757,12 @@ wss.on('connection', (ws, req) => {
           return;
         }
 
-        if (!checkRateLimit(`ws:${state.uid}`, 30, 60_000)) {
+        if (!checkRateLimit(`ws:${authedId}`, 30, 60_000)) {
           ws.send(JSON.stringify({ type: 'SCORE_REJECTED', reason: 'rate_limited' }));
           return;
         }
 
-        const userId = state.uid;
+        const userId = authedId;
         const { username, country, scoreMs, mode, device, isDaily } = data.payload || {};
 
         // Anti-cheat: only physiologically plausible reaction times are
@@ -778,12 +824,13 @@ wss.on('connection', (ws, req) => {
         // unauthenticated socket could join, and the tap handler trusted a
         // playerId out of the payload, so either player could forge the other's
         // result. Both now require the same verified uid as a score submission.
-        const joinState = socketState.get(ws);
-        if (!joinState?.uid) {
+        const joinUid = authedUid(ws);
+        if (!joinUid) {
+          ws.send(JSON.stringify({ type: 'REAUTH_REQUIRED' }));
           ws.send(JSON.stringify({ type: 'DUEL_REJECTED', reason: 'unauthenticated' }));
           return;
         }
-        if (!checkRateLimit(`duel:${joinState.uid}`, 12, 60_000)) {
+        if (!checkRateLimit(`duel:${joinUid}`, 12, 60_000)) {
           ws.send(JSON.stringify({ type: 'DUEL_REJECTED', reason: 'rate_limited' }));
           return;
         }
@@ -795,13 +842,13 @@ wss.on('connection', (ws, req) => {
           (r) =>
             r.status === 'waiting' &&
             r.players.length === 1 &&
-            r.players[0].uid !== joinState.uid
+            r.players[0].uid !== joinUid
         );
 
         const player: DuelPlayer = {
           ws,
           id: duelId('p'),
-          uid: joinState.uid,
+          uid: joinUid,
           username: String(username || 'Rival').slice(0, 30).trim() || 'Rival',
           country: sanitizeCountry(country) ?? 'US',
           avatar: String(avatar || '⚡').slice(0, 8)
@@ -878,8 +925,7 @@ wss.on('connection', (ws, req) => {
       }
 
       if (data.type === 'DUEL_TAP') {
-        const tapState = socketState.get(ws);
-        if (!tapState?.uid) return;
+        if (!authedUid(ws)) return;
 
         const { roomId, reactionMs } = data.payload || {};
         const room = typeof roomId === 'string' ? duelRooms.get(roomId) : undefined;

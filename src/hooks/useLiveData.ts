@@ -103,8 +103,24 @@ export function useLiveData(): LiveData {
     // stranded the app on the REST fallback for the rest of the session.
     let socket: WebSocket | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let reauthTimer: ReturnType<typeof setTimeout> | null = null;
     let attempt = 0;
     let disposed = false;
+
+    /**
+     * Prove identity on this socket.
+     *
+     * The server expires a socket's identity with the token behind it, so this
+     * runs again before that happens. A socket can outlive its credential by
+     * hours otherwise, and used to keep full privileges the whole time.
+     */
+    const authenticate = (ws: WebSocket) => {
+      getIdToken().then((token) => {
+        if (token && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'AUTH', token }));
+        }
+      });
+    };
 
     const handleMessage = (event: MessageEvent) => {
       try {
@@ -119,6 +135,30 @@ export function useLiveData(): LiveData {
           if (msg.ticker) setLiveTicker(msg.ticker);
           if (msg.dailyChallenge) setDailyChallenge(msg.dailyChallenge);
           setIsLoading(false);
+        }
+
+        /**
+         * Refresh ahead of expiry rather than discovering it mid-submission.
+         *
+         * Firebase ID tokens last an hour and the SDK mints a fresh one on
+         * request, so re-authenticating a few minutes early costs nothing and
+         * means a player's score is never rejected because their credential
+         * aged out between rounds.
+         */
+        if (msg.type === 'AUTH_RESULT' && msg.ok && typeof msg.expiresAtMs === 'number') {
+          if (reauthTimer) clearTimeout(reauthTimer);
+          const lead = 5 * 60 * 1000;
+          const delay = Math.max(30_000, msg.expiresAtMs - Date.now() - lead);
+          reauthTimer = setTimeout(() => {
+            const live = socketRef.current;
+            if (live && live.readyState === WebSocket.OPEN) authenticate(live);
+          }, delay);
+        }
+
+        // The server dropped our identity because the token behind it expired.
+        if (msg.type === 'REAUTH_REQUIRED') {
+          const live = socketRef.current;
+          if (live && live.readyState === WebSocket.OPEN) authenticate(live);
         }
 
         if (msg.type === 'ONLINE_COUNT') setOnlineCount(msg.count);
@@ -164,11 +204,7 @@ export function useLiveData(): LiveData {
       // whatever the payload claims.
       ws.onopen = () => {
         attempt = 0; // a connection that actually opened clears the backoff
-        getIdToken().then((token) => {
-          if (token && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'AUTH', token }));
-          }
-        });
+        authenticate(ws);
       };
 
       ws.onmessage = handleMessage;
@@ -217,6 +253,7 @@ export function useLiveData(): LiveData {
       document.removeEventListener('visibilitychange', onVisibility);
       clearTimeout(loadTimeout);
       if (retryTimer) clearTimeout(retryTimer);
+      if (reauthTimer) clearTimeout(reauthTimer);
       socket?.close();
       socketRef.current = null;
       unsubscribe();

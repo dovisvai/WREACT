@@ -1,4 +1,5 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { createHash } from 'crypto';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 /**
@@ -28,6 +29,8 @@ export interface VerifiedUser {
   uid: string;
   /** True for anonymous sign-in, which is the normal case here. */
   anonymous: boolean;
+  /** The token's own expiry, in ms. Nothing may outlive this. */
+  expiresAtMs: number;
 }
 
 /**
@@ -45,6 +48,10 @@ export async function verifyFirebaseToken(
       audience: PROJECT_ID,
       // Firebase ID tokens are RS256; pinning it stops an `alg: none` downgrade.
       algorithms: ['RS256'],
+      // A few seconds of NTP drift between this host and Google should not
+      // reject a token that is otherwise valid. Small enough that it does not
+      // meaningfully extend a token's life.
+      clockTolerance: 5,
     });
 
     // `sub` is the uid. Firebase also sets `auth_time`; a token with no subject
@@ -55,7 +62,12 @@ export async function verifyFirebaseToken(
     const provider = (payload.firebase as { sign_in_provider?: string } | undefined)
       ?.sign_in_provider;
 
-    return { uid, anonymous: provider === 'anonymous' };
+    // `exp` is guaranteed present -- jwtVerify already rejected an expired or
+    // absent one -- but treat a missing value as immediately expired rather
+    // than as "never expires".
+    const expiresAtMs = typeof payload.exp === 'number' ? payload.exp * 1000 : 0;
+
+    return { uid, anonymous: provider === 'anonymous', expiresAtMs };
   } catch {
     // Any failure is a rejection. Never fall back to trusting the caller.
     return null;
@@ -65,29 +77,65 @@ export async function verifyFirebaseToken(
 /**
  * Verification result cache.
  *
- * A socket authenticates once, but REST callers present a token per request and
- * RS256 verification is ~1ms of CPU. Caching by token for a short window keeps a
- * burst of submissions from turning into a crypto workload, without extending
- * the life of a token beyond its own expiry.
+ * RS256 verification is ~1ms of CPU and REST callers present a token per
+ * request, so a burst of submissions would otherwise become a crypto workload.
+ *
+ * Three properties this has to hold, each of which it previously did not:
+ *
+ * 1. A cache entry never outlives the token. The old TTL was a flat five
+ *    minutes from verification, so a token verified thirty seconds before it
+ *    expired stayed accepted for four and a half minutes after Google
+ *    considered it dead.
+ * 2. Raw tokens are not held in memory. The map was keyed on the JWT itself,
+ *    so a heap dump or a crash log yielded thousands of live credentials. The
+ *    key is a SHA-256 of the token now; it identifies without being usable.
+ * 3. Eviction is incremental. `clear()` at the ceiling dropped all 5000 entries
+ *    at once and produced a re-verification stampede exactly when the server
+ *    was busiest.
  */
 const cache = new Map<string, { user: VerifiedUser; expiresAt: number }>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const CACHE_MAX = 5000;
+
+function cacheKey(token: string): string {
+  return createHash('sha256').update(token).digest('base64url');
+}
+
+function evictOldest(count: number): void {
+  const now = Date.now();
+  // Expired entries first -- they are free to drop and cost nothing to keep
+  // looking for.
+  for (const [key, entry] of cache) {
+    if (entry.expiresAt <= now) cache.delete(key);
+  }
+  // Map preserves insertion order, so the front is the oldest.
+  let remaining = count - (CACHE_MAX - cache.size);
+  if (remaining <= 0) return;
+  for (const key of cache.keys()) {
+    cache.delete(key);
+    if (--remaining <= 0) break;
+  }
+}
 
 export async function verifyFirebaseTokenCached(
   token: string | undefined | null
 ): Promise<VerifiedUser | null> {
   if (!token) return null;
 
-  const hit = cache.get(token);
+  const key = cacheKey(token);
+  const hit = cache.get(key);
   if (hit && hit.expiresAt > Date.now()) return hit.user;
+  if (hit) cache.delete(key);
 
   const user = await verifyFirebaseToken(token);
   if (!user) return null;
 
-  // Bounded, so a flood of distinct junk tokens cannot grow this without limit.
-  if (cache.size >= CACHE_MAX) cache.clear();
-  cache.set(token, { user, expiresAt: Date.now() + CACHE_TTL_MS });
+  // Whichever comes first: the cache window, or the token's own expiry.
+  const expiresAt = Math.min(Date.now() + CACHE_TTL_MS, user.expiresAtMs);
+  if (expiresAt > Date.now()) {
+    if (cache.size >= CACHE_MAX) evictOldest(Math.floor(CACHE_MAX / 10));
+    cache.set(key, { user, expiresAt });
+  }
 
   return user;
 }
