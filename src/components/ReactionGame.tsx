@@ -492,21 +492,41 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
               Step {patternIndex + 1} of {patternSequence.length}
             </Label>
             <div className="grid grid-cols-2 gap-2.5">
-              {[0, 1, 2, 3].map((index) => (
-                <button
-                  key={index}
-                  type="button"
-                  onPointerDown={() => handlePatternTap(index)}
-                  className={cx(
-                    'flex h-24 items-center justify-center rounded-md font-display text-3xl font-bold transition-transform active:scale-95',
-                    patternSequence[patternIndex] === index
-                      ? 'bg-signal text-pitch-950'
-                      : 'border border-pitch-700 bg-pitch-850 text-ink-faint'
-                  )}
-                >
-                  {index + 1}
-                </button>
-              ))}
+              {[0, 1, 2, 3].map((index) => {
+                const isTarget = patternSequence[patternIndex] === index;
+
+                /**
+                 * The same button twice in a row needs to look like a new step.
+                 *
+                 * The pad does not move between steps, so when the sequence
+                 * repeats a button nothing on screen changes and the tap that
+                 * just registered looks ignored — which happens in well over
+                 * half of rounds, since the sequence is drawn with replacement.
+                 * Growing the target makes the second tap unmistakably a second
+                 * tap. It scales within its own cell, so the grid never reflows.
+                 */
+                const isRepeat =
+                  isTarget &&
+                  patternIndex > 0 &&
+                  patternSequence[patternIndex - 1] === index;
+
+                return (
+                  <button
+                    key={index}
+                    type="button"
+                    onPointerDown={() => handlePatternTap(index)}
+                    className={cx(
+                      'relative flex h-24 items-center justify-center rounded-md font-display font-bold transition-all duration-150 active:scale-95',
+                      isTarget
+                        ? 'bg-signal text-pitch-950'
+                        : 'border border-pitch-700 bg-pitch-850 text-ink-faint',
+                      isRepeat ? 'z-10 scale-110 text-4xl shadow-lg' : 'text-3xl'
+                    )}
+                  >
+                    {index + 1}
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
