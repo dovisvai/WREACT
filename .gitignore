@@ -23,6 +23,12 @@ android/local.properties
 android/captures/
 *.keystore
 !debug.keystore
+# Firebase Android config. Not a credential in the data-access sense -- Firestore
+# rules govern that -- but it carries an AIza API key that GitHub's scanner flags
+# on a public repo, and an unrestricted Google API key can be used to call other
+# APIs enabled on the project. Kept out of version control; place it manually or
+# inject it from a CI secret.
+android/app/google-services.json
 # Upload/signing keys and the passwords that unlock them. Losing these means
 # never being able to update the app; committing them means anyone can.
 *.jks
