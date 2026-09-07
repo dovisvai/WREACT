@@ -42,4 +42,11 @@ android/keystore.properties
 service-account*.json
 serviceAccountKey*.json
 AuthKey_*.p8
+# Google Cloud names a downloaded service-account key `pc-api-<digits>-<digits>-<hex>.json`,
+# which none of the patterns above match. These grant Play Developer API access:
+# reading financial data and managing subscriptions. Keep them outside the repo
+# entirely -- this is only a backstop for when they end up here by accident.
+pc-api-*.json
+*service-account*.json
+*serviceaccount*.json
 *.mobileprovision
