@@ -5,7 +5,8 @@ import { triggerHaptic } from '../utils/audio';
 interface AccountDeletionModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirmDelete: () => void;
+  /** Awaited, so the button can re-enable if deletion fails. */
+  onConfirmDelete: () => void | Promise<void>;
   username: string;
 }
 
@@ -20,7 +21,7 @@ export const AccountDeletionModal: React.FC<AccountDeletionModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (confirmText.trim().toLowerCase() !== 'delete') return;
     setIsDeleting(true);
     triggerHaptic([50, 50, 100]);
@@ -29,7 +30,16 @@ export const AccountDeletionModal: React.FC<AccountDeletionModalProps> = ({
     // Cancel and X buttons stayed enabled: tapping Cancel closed the modal and
     // then deleted the account anyway a second later. The work is real and
     // awaited now, so there is nothing to cancel into.
-    onConfirmDelete();
+    //
+    // Awaited and reset, because this modal is kept mounted by its parent: the
+    // flag survived closing and reopening, so a single failure disabled the
+    // Delete button for the rest of the app's life and the retry the error
+    // message asks for was impossible without force-quitting.
+    try {
+      await onConfirmDelete();
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   return (

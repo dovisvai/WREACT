@@ -5,7 +5,11 @@ import { clearChallengeFromUrl, parseChallengeFromUrl } from '../services/share'
 import { initNativeShell, onDeepLink } from '../services/native';
 import { revenueCat, isProActive } from '../services/revenuecat';
 import { initPush } from '../services/push';
-import { currentUserId, fetchAthleteProfile } from '../services/firebase';
+import {
+  currentUserId,
+  fetchAthleteProfile,
+  syncUserProfileToFirebase,
+} from '../services/firebase';
 import { safeSetItem } from '../utils/storage';
 
 interface AppBootOptions {
@@ -127,6 +131,17 @@ export function useAppBoot({
           if (prev.proPassActive === active) return prev;
           const next = { ...prev, proPassActive: active };
           safeSetItem('world_reaction_user', JSON.stringify(next));
+
+          /**
+           * Push the change to Firestore too, not just to this device.
+           *
+           * An expiry was written locally and nowhere else, while the merge
+           * above ORs the local and remote flags together -- so the stale
+           * remote `true` was read back on the next launch and handed Pro
+           * straight back. The subscription had ended and the store agreed it
+           * had ended; only our own record disagreed, and it won every time.
+           */
+          void syncUserProfileToFirebase(next);
           return next;
         });
       });

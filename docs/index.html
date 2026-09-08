@@ -15,6 +15,24 @@
   <p class="updated">A reaction-time game for Android</p>
 </header>
 
+<!--
+  Challenge landing.
+
+  Hidden unless the URL carries a ?c= payload written by buildChallengeLink in
+  src/services/share.ts. Everything in that payload comes from a stranger, so it
+  is validated against closed sets and written with textContent -- never as
+  markup, and never interpolated into the href of anything but the app scheme.
+-->
+<div class="panel" id="challenge" hidden>
+  <p id="challenge-line" style="color:var(--ink);font-size:17px;margin-top:0"></p>
+  <p id="challenge-sub"></p>
+  <p style="margin-bottom:0">
+    <a id="challenge-open" href="#"><strong>Open in WREACT</strong></a>
+    &nbsp;·&nbsp;
+    <a href="https://play.google.com/store/apps/details?id=com.wreact.app">Get it on Google Play</a>
+  </p>
+</div>
+
 <p>
   Post a reaction time and it contributes to your country's average. Countries
   are ranked in a weekly table that resets every Monday. A nation needs five
@@ -41,5 +59,77 @@
 </footer>
 
 </main>
+
+<script>
+/*
+ * Decode a challenge link written by buildChallengeLink (src/services/share.ts).
+ *
+ * The payload is base64url JSON and arrives from whoever sent the link, so
+ * every field is checked against a closed set or a numeric range before it is
+ * shown, and all of it is written with textContent. Nothing here builds markup
+ * from the payload, and the only href it touches is the wreact:// scheme.
+ */
+(function () {
+  var MODES = {
+    CLASSIC: 'Classic',
+    FALSE_ALARM: 'Trap',
+    PATTERN_SEQUENCE: 'Sequence',
+    PRECISION_TARGET: 'Target',
+    REVERSE_COLOR: 'Stroop',
+    DAILY_CHALLENGE: 'the daily event'
+  };
+
+  function decode(token) {
+    var padded = token.replace(/-/g, '+').replace(/_/g, '/');
+    padded += '='.repeat((4 - (padded.length % 4)) % 4);
+    // Same round-trip the app uses, so multi-byte display names survive.
+    return JSON.parse(decodeURIComponent(escape(atob(padded))));
+  }
+
+  /** A flag from a validated two-letter code. Derived, never taken as text. */
+  function flag(code) {
+    return String.fromCodePoint(
+      0x1f1e6 + code.charCodeAt(0) - 65,
+      0x1f1e6 + code.charCodeAt(1) - 65
+    );
+  }
+
+  var token = new URLSearchParams(location.search).get('c');
+  if (!token) return;
+
+  var raw;
+  try {
+    raw = decode(token);
+  } catch (e) {
+    return; // A malformed link is simply not a challenge; show the normal page.
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return;
+
+  var score = Number(raw.s);
+  if (!isFinite(score) || score < 80 || score > 2000) return;
+
+  // hasOwnProperty, not a plain lookup: `m: "__proto__"` in the payload
+  // resolves to Object.prototype, which is truthy, and printed "in [object
+  // Object]". Every key on Object.prototype is reachable that way.
+  var mode = Object.prototype.hasOwnProperty.call(MODES, raw.m) ? MODES[raw.m] : null;
+  var country = typeof raw.c === 'string' && /^[A-Z]{2}$/.test(raw.c) ? raw.c : null;
+  var name = typeof raw.u === 'string' && raw.u.trim() ? raw.u.trim().slice(0, 30) : 'Someone';
+
+  var line = name + ' posted ' + Math.round(score) + 'ms';
+  if (mode) line += ' in ' + mode;
+  if (country) line = flag(country) + '  ' + line;
+
+  document.getElementById('challenge-line').textContent = line + '.';
+  document.getElementById('challenge-sub').textContent =
+    'Think you are faster? Beat it, and your time joins your own country’s average.';
+
+  // Opens the app for anyone who has it. The token is re-encoded rather than
+  // passed through, so nothing from the link reaches the URL unescaped.
+  document.getElementById('challenge-open').href =
+    'wreact://?c=' + encodeURIComponent(token);
+
+  document.getElementById('challenge').hidden = false;
+})();
+</script>
 </body>
 </html>

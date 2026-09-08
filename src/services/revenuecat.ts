@@ -294,9 +294,13 @@ class RevenueCatService {
     }
   }
 
-  async purchasePackage(
-    pkg: RevenueCatPackageInfo
-  ): Promise<{ success: boolean; cancelled: boolean; customerInfo: RevenueCatCustomerState }> {
+  async purchasePackage(pkg: RevenueCatPackageInfo): Promise<{
+    success: boolean;
+    cancelled: boolean;
+    /** The store took payment but `wreact_pro` did not activate. */
+    chargedWithoutEntitlement?: boolean;
+    customerInfo: RevenueCatCustomerState;
+  }> {
     if (this.isSimulated || !pkg.native) {
       /**
        * On a device, this branch is a misconfiguration, not a preview.
@@ -327,7 +331,28 @@ class RevenueCatService {
 
     try {
       const { customerInfo } = await Purchases.purchasePackage({ aPackage: pkg.native });
-      return { success: true, cancelled: false, customerInfo: mapCustomerInfo(customerInfo) };
+      const mapped = mapCustomerInfo(customerInfo);
+
+      /**
+       * Success is the entitlement being live, not the call returning.
+       *
+       * A purchase completes against the product, not against the
+       * entitlement. If the product is not attached to `wreact_pro` in the
+       * dashboard, Play charges the player, this call resolves normally, and
+       * nothing unlocks -- and reporting that as success told them "Pro is
+       * active" and then took it away when the customer-info listener next
+       * fired. `restorePurchases` below already judged itself this way; the
+       * two disagreeing was an oversight, not a design.
+       */
+      const entitled = Boolean(mapped.entitlements.active[REVENUECAT_ENTITLEMENT_ID]);
+      return {
+        success: entitled,
+        cancelled: false,
+        // Distinguishes "we took your money and nothing happened" from an
+        // ordinary failure, so the UI can say something true and useful.
+        chargedWithoutEntitlement: !entitled,
+        customerInfo: mapped,
+      };
     } catch (err) {
       const cancelled = Boolean((err as { userCancelled?: boolean })?.userCancelled);
       if (!cancelled) console.error('[RevenueCat] purchase failed:', err);

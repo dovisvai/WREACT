@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ShieldCheck, FileText, Lock, X, ExternalLink, Check, AlertCircle } from 'lucide-react';
 
 interface LegalModalProps {
@@ -13,6 +13,14 @@ export const LegalModal: React.FC<LegalModalProps> = ({
   initialTab = 'PRIVACY',
 }) => {
   const [tab, setTab] = useState<'PRIVACY' | 'TERMS' | 'EULA'>(initialTab);
+
+  // The parent keeps this instance mounted and only toggles `isOpen`, so the
+  // initial value was read once at app start and never again: opening Privacy,
+  // closing, then tapping "Terms of use" reopened on Privacy and stayed wrong
+  // for the rest of the visit.
+  useEffect(() => {
+    if (isOpen) setTab(initialTab);
+  }, [isOpen, initialTab]);
 
   if (!isOpen) return null;
 
@@ -83,16 +91,26 @@ export const LegalModal: React.FC<LegalModalProps> = ({
 
               <h3 className="text-sm font-bold text-ink">1. Data We Collect</h3>
               <p>
-                - <strong>Reaction Performance Data:</strong> Millisecond response times, false starts, touch coordinates, and game mode records.
+                {/* "touch coordinates" was listed here and is not collected —
+                    the published policy's §2 is a closed list that excludes it.
+                    In-app copy disclosing collection that does not happen is
+                    the wrong direction for a Data Safety declaration. */}
+                - <strong>Reaction Performance Data:</strong> Millisecond response times, false starts, game mode, and when each run happened.
                 <br />
                 - <strong>Account &amp; Identity:</strong> A display name and avatar you choose, tied to an anonymous account created automatically on this device. No email address, phone number or real name is collected.
                 <br />
                 - <strong>Country:</strong> The nation you pick when you first open the app, suggested from your device time zone. No location permission is requested and GPS is never used.
+                <br />
+                - <strong>IP address:</strong> Seen by our server and used only for rate limiting, to stop automated abuse of the leaderboard. It is not retained as a profile of you.
               </p>
 
-              <h3 className="text-sm font-bold text-ink">2. In-App Purchases (RevenueCat)</h3>
+              <h3 className="text-sm font-bold text-ink">2. Who else receives data</h3>
               <p>
-                We use RevenueCat to validate Google Play purchase receipts. RevenueCat receives an anonymous App User ID and the receipt, which unlocks your entitlement without exposing any payment details to us.
+                - <strong>Google Firebase</strong> stores your anonymous account ID, your profile and your times, and authenticates them.
+                <br />
+                - <strong>OneSignal</strong> receives a push identifier and gameplay values (country, national rank, athletes still needed, streak, best time, matchday, subscription status) — but only if you allow notifications. Refuse, and none of it is sent.
+                <br />
+                - <strong>RevenueCat</strong> validates Google Play purchase receipts. It receives an anonymous App User ID and the receipt, which unlocks your entitlement without exposing any payment details to us.
               </p>
 
               <h3 className="text-sm font-bold text-ink">3. Your Rights &amp; Account Deletion</h3>
@@ -106,7 +124,10 @@ export const LegalModal: React.FC<LegalModalProps> = ({
 
               <h3 className="text-sm font-bold text-ink">4. Contact & Support</h3>
               <p>
-                For privacy inquiries or data export requests, reach our compliance team at <span className="text-gold">privacy@wreact.app</span>.
+                {/* Was privacy@wreact.app — a mailbox on a domain that is not
+                    registered, and a different address from the one the
+                    published policy gives for the same statutory contact. */}
+                For privacy inquiries or data export requests, email <span className="text-gold">dovis.vai@gmail.com</span>. The full policy is published at <span className="text-gold">dovisvai.github.io/WREACT/privacy.html</span>.
               </p>
             </div>
           )}
@@ -120,7 +141,11 @@ export const LegalModal: React.FC<LegalModalProps> = ({
 
               <h3 className="text-sm font-bold text-ink">2. Leaderboard Fair Play & Anti-Cheat</h3>
               <p>
-                WREACT employs real-time latency auditing and mechanical touch cadence verification. Any automated macro software, script-injected millisecond timings below biological limits (sub-50ms), or leaderboard tampering will result in immediate permanent athlete account disqualification.
+                {/* Described "real-time latency auditing and mechanical touch
+                    cadence verification", neither of which exists, and put the
+                    floor at 50ms when every layer actually enforces 80ms — so a
+                    player rejected at 79ms had been told the line was 50. */}
+                Every submission is validated server-side: identity comes from a verified token rather than the app, and times outside the plausible window for the discipline are rejected — the floor is 80ms, below the physiological limit for visual reaction. Automated input, macro software or leaderboard tampering will result in permanent disqualification.
               </p>
 
               <h3 className="text-sm font-bold text-ink">3. 1v1 Duels & Matchmaking</h3>

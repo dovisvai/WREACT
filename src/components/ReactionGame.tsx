@@ -127,7 +127,19 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
     if (timerRef.current) clearTimeout(timerRef.current);
     setTestState('IDLE');
     setReactionTime(null);
-  }, [playMode]);
+    /**
+     * Keyed on `isDailyEntry` as well as `playMode`.
+     *
+     * `playMode` is `isDailyEntry ? dailyMode : mode`, so moving between the
+     * Daily tab and the tab of today's underlying discipline changes both
+     * inputs and leaves the result identical — the effect never fired, the run
+     * in progress survived the switch, and `isDailyEntry` flipped underneath
+     * it. A player who started the daily and then tapped that discipline in
+     * the rail mid-wait had their run submitted as an ordinary one: the daily
+     * entry never happened, the streak never advanced, and nothing on screen
+     * said so. The reverse direction credited an ordinary run as the daily.
+     */
+  }, [playMode, isDailyEntry]);
 
   useEffect(
     () => () => {
@@ -295,9 +307,9 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
       if (audioEnabled) playSignalSound();
       haptic.success();
 
-      if (!personalBest || ms < personalBest) {
+      const isNewBest = !personalBest || ms < personalBest;
+      if (isNewBest) {
         setPersonalBest(ms);
-        safeSetItem(`pb_${playMode}`, String(ms));
         if (audioEnabled) playFanfareSound();
         try {
           confetti({
@@ -312,6 +324,19 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
       }
 
       onScoreSubmitted(ms, playMode, isDailyEntry);
+
+      /**
+       * Recorded after the submission, never before it.
+       *
+       * The handler above reads this same key to learn what the player's
+       * previous best was. Writing it first meant a new personal best was
+       * compared against itself: `scoreMs < previousBest` was false on exactly
+       * the runs that were an improvement, so the profile's best never moved
+       * off its initial 0, the Sub-150, F1-reflexes and National-best badges
+       * could never unlock, and the contribution panel reported a 0ms gain on
+       * every run that actually pulled the national average down.
+       */
+      if (isNewBest) safeSetItem(`pb_${playMode}`, String(ms));
       if (challenge) {
         setSettledChallenge(challenge);
         onChallengeSettled();
@@ -385,6 +410,24 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
   const handlePatternTap = (index: number) => {
     if (testState !== 'SIGNAL') return;
 
+    /**
+     * The same double-tap window the WAITING overlay uses.
+     *
+     * Sequence and Stroop have no WAITING phase: Start puts the board on
+     * screen immediately, and Start is a button, so it fires on release. The
+     * second tap of an ordinary double-tap therefore lands on whatever just
+     * mounted underneath it -- and on a 375px viewport the entire Start button
+     * sits over tiles 3 and 4, with "Go again" over them too. A stray tap that
+     * happens to match the first step advanced the sequence silently, so the
+     * player saw "Step 2 of 4" without having played step 1 and the run was
+     * scored over three taps against a clock started before the first.
+     */
+    if (Date.now() - waitStartedAtRef.current < DOUBLE_TAP_GRACE_MS) return;
+
+    // The board has not been painted yet, so this cannot be a response to it —
+    // and startTimeRef would still hold the previous round's stamp.
+    if (!signalPaintedRef.current) return;
+
     if (index !== patternSequence[patternIndex]) {
       setTestState('FALSE_START');
       if (audioEnabled) playErrorSound();
@@ -404,6 +447,13 @@ export const ReactionGame: React.FC<ReactionGameProps> = ({
 
   const handleStroopTap = (color: string) => {
     if (testState !== 'SIGNAL') return;
+
+    // As in handlePatternTap. Here the stray tap has a one-in-four chance of
+    // hitting the ink colour, which recorded roughly 90-150ms against a mode
+    // whose target is 750ms -- a fabricated personal best, and on the days the
+    // rotation nominates Stroop it topped the public daily leaderboard.
+    if (Date.now() - waitStartedAtRef.current < DOUBLE_TAP_GRACE_MS) return;
+    if (!signalPaintedRef.current) return;
 
     if (color === stroop.ink) {
       recordResult(performance.now() - startTimeRef.current);

@@ -63,24 +63,46 @@ export const MonetizationModal: React.FC<MonetizationModalProps> = ({
     playClickSound();
     await haptic.medium();
 
-    const result = await revenueCat.purchasePackage(selected);
-    setPurchasing(false);
+    // try/finally: setPurchasing(false) used to sit on the happy path only, so
+    // any rejection left the button reading "Contacting store" until the app
+    // was restarted.
+    try {
+      const result = await revenueCat.purchasePackage(selected);
 
-    if (result.cancelled) return;
+      if (result.cancelled) return;
 
-    if (result.success) {
-      playFanfareSound();
-      await haptic.success();
-      setStatus({
-        text: offering.isSimulated
-          ? 'Preview unlock applied on this device. No real purchase was made.'
-          : 'Pro is active. Thanks for backing WREACT.',
-        tone: offering.isSimulated ? 'info' : 'success',
-      });
-      onActivateProPass?.();
-    } else {
-      await haptic.error();
-      setStatus({ text: 'The purchase could not be completed.', tone: 'error' });
+      if (result.success) {
+        playFanfareSound();
+        await haptic.success();
+        setStatus({
+          text: offering.isSimulated
+            ? 'Preview unlock applied on this device. No real purchase was made.'
+            : 'Pro is active. Thanks for backing WREACT.',
+          tone: offering.isSimulated ? 'info' : 'success',
+        });
+        onActivateProPass?.();
+      } else if (result.chargedWithoutEntitlement) {
+        // The one case the player must not be told is a plain failure: the
+        // store may already have their money.
+        await haptic.error();
+        setStatus({
+          text:
+            'The store completed the purchase but Pro has not activated yet. ' +
+            'Tap Restore in a moment — if it stays locked, email dovis.vai@gmail.com ' +
+            'and you will not be charged twice.',
+          tone: 'error',
+        });
+      } else {
+        await haptic.error();
+        setStatus({
+          text: offering.isSimulated
+            ? 'This build has no store connected, so nothing can be purchased yet.'
+            : 'The purchase could not be completed. Nothing was charged.',
+          tone: 'error',
+        });
+      }
+    } finally {
+      setPurchasing(false);
     }
   };
 
@@ -89,21 +111,26 @@ export const MonetizationModal: React.FC<MonetizationModalProps> = ({
     setStatus(null);
     playClickSound();
 
-    const result = await revenueCat.restorePurchases();
-    setRestoring(false);
+    // Same guard as the purchase path: a rejection here left the Restore
+    // button stuck reading "Checking" for the rest of the session.
+    try {
+      const result = await revenueCat.restorePurchases();
 
-    if (result.restored) {
-      playFanfareSound();
-      await haptic.success();
-      setStatus({ text: 'Purchases restored.', tone: 'success' });
-      onActivateProPass?.();
-    } else {
-      setStatus({
-        text: result.success
-          ? 'No active subscription found for this account.'
-          : 'Restore failed. Check your connection and try again.',
-        tone: result.success ? 'info' : 'error',
-      });
+      if (result.restored) {
+        playFanfareSound();
+        await haptic.success();
+        setStatus({ text: 'Purchases restored.', tone: 'success' });
+        onActivateProPass?.();
+      } else {
+        setStatus({
+          text: result.success
+            ? 'No active subscription found for this account.'
+            : 'Restore failed. Check your connection and try again.',
+          tone: result.success ? 'info' : 'error',
+        });
+      }
+    } finally {
+      setRestoring(false);
     }
   };
 
@@ -297,8 +324,15 @@ export const MonetizationModal: React.FC<MonetizationModalProps> = ({
               bought them something. */}
           {offering.isSimulated && !proPassActive && (
             <p className="mt-4 rounded-md border border-pitch-700 bg-pitch-850 p-3 text-[11px] leading-relaxed text-ink-faint">
-              Preview mode — no store is connected on this platform, so nothing here can be
-              charged. Purchases work in the iOS and Android builds.
+              {/*
+                The old copy read "Purchases work in the iOS and Android builds"
+                — and this notice renders on Android, under a catalogue of
+                invented prices, whenever the store cannot be reached. It said
+                the opposite of what was true where it was shown.
+              */}
+              Example pricing — this build cannot reach the store, so these figures are
+              placeholders rather than real prices, and nothing here can be charged. The
+              price you would actually pay is set by Google Play in your own currency.
             </p>
           )}
 

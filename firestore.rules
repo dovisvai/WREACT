@@ -16,8 +16,16 @@ service cloud.firestore {
       return val is string && val.size() > 0 && val.size() <= maxLen;
     }
 
+    // Exactly two uppercase letters — an ISO 3166-1 alpha-2 code and nothing
+    // else. This was `size() >= 2 && size() <= 3`, which is why the sanctions
+    // list below could be walked straight past: "RUS" and "RU " are both three
+    // characters and neither equals "RU", so both were accepted and each
+    // minted its own qualifying standings row. "  " and "XX" got in the same
+    // way. The server checks membership of the 198 shipped codes on top of
+    // this, so a well-formed but non-existent code like "XX" is dropped there
+    // rather than duplicating that whole list here.
     function isValidCountry(code) {
-      return code is string && code.size() >= 2 && code.size() <= 3;
+      return code is string && code.matches('^[A-Z]{2}$');
     }
 
     // Markets the app does not accept entries from: comprehensive OFAC

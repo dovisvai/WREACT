@@ -149,9 +149,28 @@ export async function getPushDiagnostics(): Promise<PushDiagnostics> {
   }
 }
 
-/** Push the current segmentation tags. Safe to call often; cheap and idempotent. */
+/**
+ * Push the current segmentation tags. Safe to call often; cheap and idempotent.
+ *
+ * Gated on permission, not merely on the SDK being up. This ran on every native
+ * launch for every player, so someone who tapped "no" on the notification
+ * prompt — or who never opened the Match Alerts sheet at all — still had their
+ * country, rank, streak, best time and subscription status attached to a
+ * OneSignal record. The published policy says the push identifier exists only
+ * "if you allow notifications", so sending profile values for a player who
+ * refused contradicted it directly.
+ */
 export function syncPushTags(tags: Partial<PushTags>): void {
   if (!isNative() || !initialized) return;
+
+  // Fire-and-forget: the permission read is async, and a tag sync is never
+  // urgent enough to make callers await it.
+  void hasPushPermission().then((allowed) => {
+    if (allowed) sendTags(tags);
+  });
+}
+
+function sendTags(tags: Partial<PushTags>): void {
 
   const clean: Record<string, string> = {};
   for (const [key, value] of Object.entries(tags)) {

@@ -42,7 +42,7 @@ import {
 } from './services/firebase';
 import { useLiveData } from './hooks/useLiveData';
 import { useAppBoot } from './hooks/useAppBoot';
-import { safeSetItem } from './utils/storage';
+import { safeGetItem, safeSetItem } from './utils/storage';
 
 function detectDevice(): DeviceOS {
   const p = platform();
@@ -187,12 +187,34 @@ export default function App() {
     // every score in Firestore -- both world-readable -- so the player stayed
     // on the public leaderboard after being told their data was purged.
     const result = await deleteAccountAndData();
-    if (!result.ok) {
-      console.warn('[WREACT] Remote deletion failed; local data left intact:', result.error);
+
+    /**
+     * Report what actually happened, not what was attempted.
+     *
+     * Deletion runs scores, then profile, then the identity. The last step is
+     * the one that fails, so the old message -- "nothing has been removed" --
+     * was usually false at the exact moment it was shown: the times and the
+     * profile were already gone. Worse, returning here kept the local profile,
+     * which the next saved score pushed straight back to Firestore.
+     */
+    const removedSomething =
+      result.scoresDeleted > 0 || result.profileDeleted || result.accountDeleted;
+
+    if (!result.ok && !removedSomething) {
+      console.warn('[WREACT] Remote deletion failed; nothing was removed:', result.error);
       window.alert(
         'Your data could not be deleted right now. Check your connection and try again — nothing has been removed.'
       );
       return;
+    }
+
+    if (!result.ok) {
+      console.warn('[WREACT] Remote deletion partially completed:', result.error);
+      window.alert(
+        'Your times and profile have been deleted and are off the leaderboard. ' +
+          'The anonymous account itself could not be removed — this device is being ' +
+          'reset now, and emailing dovis.vai@gmail.com will clear the rest.'
+      );
     }
 
     localStorage.clear();
@@ -243,12 +265,18 @@ export default function App() {
        * right; only the sentence explaining them was wrong.
        */
       const previousBest = (() => {
-        try {
-          const perMode = Number.parseInt(localStorage.getItem(`pb_${mode}`) ?? '', 10);
-          if (isPlausibleForMode(perMode, mode)) return perMode;
-        } catch {
-          /* storage unavailable; fall through */
-        }
+        const perMode = Number.parseInt(safeGetItem(`pb_${mode}`) ?? '', 10);
+        if (isPlausibleForMode(perMode, mode)) return perMode;
+
+        // Storage can be blocked or cleared, and the profile is the durable
+        // record for the ranked mode. Without this fallback every run looks
+        // like a first score, so a slow run overwrites a fast personal best
+        // and the contribution panel tells the player they slowed their
+        // country down. Only the ranked mode, because `bestScore` is that
+        // mode's number -- reading it for a Stroop run is the cross-mode
+        // confusion this panel already had once.
+        if (isRankedMode(mode) && userProfile.bestScore > 0) return userProfile.bestScore;
+
         return null;
       })();
 

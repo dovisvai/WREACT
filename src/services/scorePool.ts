@@ -10,8 +10,10 @@ import {
   getDocs,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { ScoreRecord } from '../types';
+import { GameMode, ScoreRecord } from '../types';
 import { Matchday } from '../utils/matchday';
+import { ALL_COUNTRIES } from '../utils/countries';
+import { isRestrictedCountry } from '../utils/restrictedCountries';
 
 /**
  * Server-side read path for the score pool.
@@ -62,14 +64,55 @@ function writtenAt(data: FirestoreScoreDoc): number {
   return Number.isFinite(parsed) ? parsed : Date.now();
 }
 
-function toScoreRecord(id: string, data: FirestoreScoreDoc): ScoreRecord {
+/** The 198 codes the app ships. Anything else cannot be a nation we rank. */
+const KNOWN_COUNTRY_CODES = new Set(ALL_COUNTRIES.map((c) => c.code));
+
+/** Closed set, so an unknown string cannot be cast into a discipline. */
+const KNOWN_MODES = new Set<GameMode>([
+  'CLASSIC',
+  'FALSE_ALARM',
+  'PATTERN_SEQUENCE',
+  'PRECISION_TARGET',
+  'REVERSE_COLOR',
+  'DAILY_CHALLENGE',
+]);
+
+/**
+ * Read one durable score, or null when it cannot be trusted.
+ *
+ * This is the ingest the socket and REST paths' `sanitizeCountry` never
+ * covered. It used to do `(data.country || 'US').toUpperCase()` and hand the
+ * result straight to the standings, while the database rules behind it checked
+ * only that the code was two or three characters long. So `"RUS"`, `"RU "`,
+ * `"XX"` and `"  "` were all accepted and each minted a real, sortable,
+ * qualifying row: five anonymous sign-ins writing `country: "RUS"` with an
+ * 80ms time put a sanctioned phantom nation at world rank one, above every
+ * real country, without touching the server at all.
+ *
+ * A row that fails these checks is dropped rather than corrected. Guessing a
+ * nation for a score is how "US" became the default for anything unparseable,
+ * and attributing someone's time to a country they did not choose is the one
+ * thing this table must never do.
+ */
+function toScoreRecord(id: string, data: FirestoreScoreDoc): ScoreRecord | null {
+  const country = typeof data.country === 'string' ? data.country.trim().toUpperCase() : '';
+  if (!KNOWN_COUNTRY_CODES.has(country) || isRestrictedCountry(country)) return null;
+
+  const mode = typeof data.mode === 'string' ? (data.mode as GameMode) : null;
+  if (!mode || !KNOWN_MODES.has(mode)) return null;
+
+  const scoreMs = Number(data.scoreMs);
+  if (!Number.isFinite(scoreMs) || scoreMs <= 0) return null;
+
+  if (typeof data.userId !== 'string' || !data.userId) return null;
+
   return {
     id: `fs-${id}`,
     userId: data.userId,
     username: data.username || 'Anonymous',
-    country: (data.country || 'US').toUpperCase(),
-    scoreMs: Number(data.scoreMs) || 0,
-    mode: (data.mode || 'CLASSIC') as ScoreRecord['mode'],
+    country,
+    scoreMs,
+    mode,
     timestamp: writtenAt(data),
     // device is deliberately omitted: Firestore does not store it, and
     // asserting a platform we do not know would be inventing data.
@@ -116,7 +159,8 @@ export async function fetchMatchdayScores(
       if (page.empty) break;
 
       for (const doc of page.docs) {
-        out.push(toScoreRecord(doc.id, doc.data() as FirestoreScoreDoc));
+        const record = toScoreRecord(doc.id, doc.data() as FirestoreScoreDoc);
+        if (record) out.push(record);
       }
 
       if (page.size < PAGE_SIZE) break;

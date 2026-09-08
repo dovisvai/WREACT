@@ -262,12 +262,26 @@ export async function fetchAthleteProfile(): Promise<Partial<UserProfile> | null
 export async function deleteAccountAndData(): Promise<{
   ok: boolean;
   scoresDeleted: number;
+  /** True once the athlete document is gone, even if a later step failed. */
+  profileDeleted: boolean;
+  /** True once the anonymous identity itself is gone. */
+  accountDeleted: boolean;
   error?: string;
 }> {
   const user = await ensureSignedIn();
-  if (!user) return { ok: false, scoresDeleted: 0, error: 'not-signed-in' };
+  if (!user) {
+    return {
+      ok: false,
+      scoresDeleted: 0,
+      profileDeleted: false,
+      accountDeleted: false,
+      error: 'not-signed-in',
+    };
+  }
   const uid = user.uid;
   let scoresDeleted = 0;
+  let profileDeleted = false;
+  let accountDeleted = false;
 
   try {
     // Scores first: the rules allow an owner to delete their own, and doing
@@ -288,19 +302,32 @@ export async function deleteAccountAndData(): Promise<{
     }
 
     await deleteDoc(doc(db, ATHLETES_COLLECTION, uid));
+    profileDeleted = true;
 
     // Finally the identity itself, so a reinstall is genuinely a new athlete
     // and the locked nation does not follow them.
     await deleteUser(user);
-    authReady = null;
+    accountDeleted = true;
 
-    return { ok: true, scoresDeleted };
+    return { ok: true, scoresDeleted, profileDeleted, accountDeleted };
   } catch (err) {
     const message = (err as { code?: string; message?: string })?.code
       ?? (err as Error)?.message
       ?? 'unknown';
     console.warn('[Firebase] Account deletion failed:', err);
-    return { ok: false, scoresDeleted, error: message };
+    return { ok: false, scoresDeleted, profileDeleted, accountDeleted, error: message };
+  } finally {
+    /**
+     * Drop the cached session whenever anything was actually removed.
+     *
+     * `deleteUser` is the step most likely to fail -- Firebase wants a recent
+     * sign-in, and an anonymous account has no credential to reauthenticate
+     * with. This used to sit after that call, so a failure left the old uid
+     * cached: the next saved score recreated the athlete document and the
+     * scores under the very same id, putting a "deleted" player back on the
+     * public leaderboard with their name, country, streak and badges intact.
+     */
+    if (scoresDeleted > 0 || profileDeleted || accountDeleted) authReady = null;
   }
 }
 

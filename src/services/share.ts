@@ -2,6 +2,7 @@ import { Share } from '@capacitor/share';
 import { ChallengeInvite, GameMode } from '../types';
 import { getCountryFlag, getCountryName, ALL_COUNTRIES } from '../utils/countries';
 import { isRestrictedCountry } from '../utils/restrictedCountries';
+import { isPlausibleForMode } from '../utils/standings';
 import { isNative } from './native';
 
 /**
@@ -23,13 +24,35 @@ import { isNative } from './native';
  */
 const CONFIGURED_SHARE_ORIGIN = (import.meta.env.VITE_SHARE_ORIGIN ?? '').replace(/\/+$/, '');
 
+/**
+ * Where a shared link points when nothing is configured.
+ *
+ * This used to be `https://wreact.app`, which is not registered -- so every
+ * link a player shared resolved to a DNS failure. The recipient of a challenge
+ * got a browser error page, which is worse than sending nothing at all, and it
+ * disabled the only distribution this app has.
+ *
+ * It points at the GitHub Pages site instead: a real origin, already serving
+ * the policy pages, and one that costs nothing. That page decodes the same `?c=`
+ * payload this file writes, so a recipient sees who challenged them and the
+ * time to beat, then gets handed to the app or to the store.
+ *
+ * App Links still cannot verify here -- Android reads assetlinks.json from the
+ * domain root, and a project Pages site is a subpath -- so a tap opens the
+ * landing page rather than the app directly. When a real domain is owned, set
+ * VITE_SHARE_ORIGIN to it, serve /.well-known/assetlinks.json with the Play
+ * signing SHA-256, and the same links start opening the app natively with no
+ * other change.
+ */
+const DEFAULT_SHARE_ORIGIN = 'https://dovisvai.github.io/WREACT';
+
 export const SHARE_ORIGIN = CONFIGURED_SHARE_ORIGIN
   ? CONFIGURED_SHARE_ORIGIN
   : isNative()
-  ? 'https://wreact.app'
+  ? DEFAULT_SHARE_ORIGIN
   : typeof window !== 'undefined' && /^https?:$/.test(window.location.protocol)
   ? window.location.origin
-  : 'https://wreact.app';
+  : DEFAULT_SHARE_ORIGIN;
 
 /* -------------------------------------------------------------------------- */
 /* Challenge links                                                            */
@@ -92,16 +115,27 @@ export function parseChallengeFromUrl(
     const raw = JSON.parse(fromBase64Url(token));
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
 
-    const scoreMs = Number(raw.s);
-    if (!Number.isFinite(scoreMs) || scoreMs < 80 || scoreMs > 2000) return null;
-
     // Everything below arrives from a link a stranger sent. It is displayed, so
     // the values are validated against closed sets rather than merely truncated
     // -- `as GameMode` on an attacker-supplied string was a cast, not a check,
     // and a three-character country slice let arbitrary codes through the same
     // way the server's did before it was tightened.
     const country = String(raw.c ?? '').trim().toUpperCase();
-    const mode = String(raw.m ?? '');
+    const rawMode = String(raw.m ?? '');
+    const mode: GameMode = CHALLENGE_MODES.has(rawMode) ? (rawMode as GameMode) : 'CLASSIC';
+
+    /**
+     * Judged against the mode's own ceiling, not a flat 2000ms.
+     *
+     * The bound is resolved after the mode for that reason. A flat cap
+     * rejected times the app itself emits: `buildChallengeLink` applies no
+     * bound, while Sequence runs to 8000ms and Stroop to 4000ms, so a decent
+     * Sequence run — which its own ceiling comment puts near 1700ms, with
+     * ordinary ones past 2000 — produced a link this parser refused. The
+     * recipient saw no challenge and no error; the invite simply evaporated.
+     */
+    const scoreMs = Number(raw.s);
+    if (!isPlausibleForMode(scoreMs, mode)) return null;
 
     return {
       username: String(raw.u ?? '').slice(0, 30).trim() || 'A rival',
@@ -110,7 +144,7 @@ export function parseChallengeFromUrl(
       country: KNOWN_CODES.has(country) && !isRestrictedCountry(country) ? country : 'US',
       avatar: String(raw.a ?? '').slice(0, 8) || '⚡',
       scoreMs: Math.round(scoreMs),
-      mode: CHALLENGE_MODES.has(mode) ? (mode as GameMode) : 'CLASSIC',
+      mode,
     };
   } catch {
     return null;

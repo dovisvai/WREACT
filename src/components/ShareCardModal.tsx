@@ -3,6 +3,7 @@ import { X, Share2, Link2, Check, Loader2, Download } from 'lucide-react';
 import { CountryStanding, GameMode } from '../types';
 import { getCountryName, getPercentileRating } from '../utils/countries';
 import { rankAgainstNations } from '../utils/standings';
+import { isRankedMode } from '../utils/matchday';
 import {
   buildChallengeLink,
   shareResult,
@@ -44,17 +45,30 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = ({
   const tier = getPercentileRating(scoreMs);
   const isNationalBest = Boolean(standing && scoreMs < standing.bestMs);
 
+  /**
+   * Only the ranked discipline may make a standings claim.
+   *
+   * The result screen already says a practice run "does not affect Lithuania's
+   * average" — and then this card, built from the same run, was headed WORLD
+   * STANDINGS and asserted "BEATS 12 OF 60 NATIONS", a national average, and
+   * sometimes FASTEST IN LT. Those figures come from the CLASSIC-only table,
+   * so a 900ms Stroop time was being ranked against classic reaction averages
+   * and posted publicly as a placement. The two screens contradicted each
+   * other about the same number.
+   */
+  const ranked = isRankedMode(mode);
+
   const cardData: ShareCardData = {
     username,
     country: code,
     avatar,
     scoreMs,
     mode,
-    countryRank: standing?.rank ?? null,
-    countryAvgMs: standing?.qualified ? standing.avgMs : null,
-    beatsNations: nations.beats,
-    totalNations: nations.total,
-    isNationalBest,
+    countryRank: ranked ? standing?.rank ?? null : null,
+    countryAvgMs: ranked && standing?.qualified ? standing.avgMs : null,
+    beatsNations: ranked ? nations.beats : undefined,
+    totalNations: ranked ? nations.total : undefined,
+    isNationalBest: ranked && isNationalBest,
   };
 
   const invite = { username, country: code, avatar, scoreMs, mode };
