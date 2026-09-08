@@ -4,7 +4,7 @@ Living record of where this project actually stands. Updated after each
 completed task, so any session (or person) can pick up without re-deriving
 everything.
 
-**Last updated:** 2026-09-07 · matchday 6 · token lifecycle hardened
+**Last updated:** 2026-09-08 · matchday 6 · versionCode 2 built and signed, awaiting upload
 
 ---
 
@@ -91,9 +91,40 @@ Console beyond these two subscriptions.
     kept continuously open past an hour stops posting scores until the socket
     reconnects. Backgrounding and returning fixes it, and the heartbeat drops
     dead sockets, so it is rare in practice. If a tester reports scores silently
-    stopping, this is why. Fixed in the next build, which RevenueCat requires
-    regardless.
+    stopping, this is why. Fixed in versionCode 2.
 - [x] **Firestore rules deployed and emulator-tested.**
+- [x] **versionCode 2 / 1.0.1 built and signed** (`c0f4d40`). `jar verified`, 7.38 MB,
+  and the shipped JS was unpacked and checked to actually contain the fixes rather
+  than assumed to. **Not yet uploaded** — this is the next Play Console action.
+
+### The auth lifecycle round (`c0f4d40`)
+
+A focused review of the token-expiry change found six defects, every one of
+which ended with a player losing something they had earned while the screen
+said otherwise. All six fixed, three verified against a running server:
+
+- **A socket could be permanently anonymous.** The client only re-armed its
+  refresh on `AUTH_RESULT` with `ok:true`; there was no `else`, so a refused
+  token was dropped, no timer was set and nothing retried. Re-sending would not
+  have helped — the SDK serves its cached copy — so a refusal now forces one
+  fresh mint and stops if that is refused too.
+- **Rejected scores were a `console.warn`.** They are now replayed over REST,
+  which proves identity per request and so succeeds exactly where the socket
+  failed. FIFO and capped, since the server answers in order.
+- **The flood guard punished the recovery it had asked for.** Attempts never
+  decayed, so four rounds across a session added up to a disconnect. 15s decay.
+- **An unauthenticated `DUEL_TAP` was a bare `return`.** The client marks itself
+  as tapped before sending and only a countdown clears that, so the room sat
+  until the reap timeout and ended abandoned **for the opponent too**.
+- **The duel socket never handled `AUTH_RESULT`** — only one of the two sockets
+  had the pre-expiry refresh.
+- **Re-auth on resume**, because a backgrounded webview suspends the timer meant
+  to do it; and the parse error logs its name only, since a JSON syntax error
+  quotes the input and the frame that fails to parse usually carries a token.
+
+Old-server compatibility is safe: versionCode 2 sends nothing new, it only
+*handles* new messages, so it behaves exactly as before against a server that
+never sends them.
 
 ### Code — fixed and verified this cycle
 
@@ -251,5 +282,9 @@ What was actually exercised, so nothing gets re-claimed on the strength of a cod
 | Web key still works | Live call accepted (created one stray anonymous user) |
 | Auth gate after token changes | Bad token → `AUTH_RESULT ok=false`, then `REAUTH_REQUIRED` + rejection on both scores and duels |
 | FCM config in the bundle | `google_app_id` present in generated resources |
+| Unauthed duel tap is answered | Live socket → `REAUTH_REQUIRED` → `DUEL_TAP_REJECTED` (was silence) |
+| Flood counter forgives paced play | 3 attempts, 16s gap, 3 more → socket stayed open |
+| Flood counter still stops a burst | 8 frames back to back → `CLOSED 1008` |
+| v2 bundle contains the fixes | Unpacked the AAB; found `DUEL_TAP_REJECTED`, `AUTH_RESULT`, `wreact_pro` in the shipped JS |
 
 **Not verified:** the release build's UI on a woken screen (display would not wake over adb); push delivery (no FCM credential yet); a real purchase (no products yet).
