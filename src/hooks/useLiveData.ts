@@ -29,6 +29,32 @@ export interface ScoreSubmission {
   isDaily: boolean;
 }
 
+/**
+ * Submit over REST, proving identity per request.
+ *
+ * This is the path that still works when the socket's identity has lapsed:
+ * the socket authenticates once and can fall out of date, while this mints a
+ * token for the submission it is carrying. It is both the cold-start path and
+ * the recovery path for a score the socket refused.
+ */
+async function postScore(submission: ScoreSubmission): Promise<void> {
+  const token = await getIdToken();
+  if (!token) return;
+  try {
+    await apiFetch('/api/score', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(submission),
+    });
+  } catch {
+    // The score is already on the player's screen and Firestore holds the
+    // durable copy; a failed relay costs the live ticker, not the record.
+  }
+}
+
 export interface LiveData {
   scores: ScoreRecord[];
   /** Authoritative national table for the matchday, computed server-side. */
@@ -67,6 +93,17 @@ export function useLiveData(): LiveData {
   const [isLoading, setIsLoading] = useState(true);
 
   const socketRef = useRef<WebSocket | null>(null);
+
+  /**
+   * Scores sent over the socket and not yet answered.
+   *
+   * The server rejects in the order it received, so this drains FIFO: a
+   * rejection consumes the submission that caused it. It exists so that a
+   * score refused for a lapsed identity can be replayed instead of vanishing
+   * with a console warning, which is what used to happen. Capped, because
+   * nothing drains it when every submission is accepted.
+   */
+  const pendingScoresRef = useRef<ScoreSubmission[]>([]);
 
   useEffect(() => {
     apiFetch('/api/leaderboard')
@@ -114,13 +151,17 @@ export function useLiveData(): LiveData {
      * runs again before that happens. A socket can outlive its credential by
      * hours otherwise, and used to keep full privileges the whole time.
      */
-    const authenticate = (ws: WebSocket) => {
-      getIdToken().then((token) => {
+    const authenticate = (ws: WebSocket, force = false) => {
+      getIdToken(force).then((token) => {
         if (token && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'AUTH', token }));
         }
       });
     };
+
+    // Guards the one-shot forced refresh below, so a token the server will
+    // never accept cannot turn into a refresh loop.
+    let forcedRefresh = false;
 
     const handleMessage = (event: MessageEvent) => {
       try {
@@ -145,14 +186,32 @@ export function useLiveData(): LiveData {
          * means a player's score is never rejected because their credential
          * aged out between rounds.
          */
-        if (msg.type === 'AUTH_RESULT' && msg.ok && typeof msg.expiresAtMs === 'number') {
-          if (reauthTimer) clearTimeout(reauthTimer);
-          const lead = 5 * 60 * 1000;
-          const delay = Math.max(30_000, msg.expiresAtMs - Date.now() - lead);
-          reauthTimer = setTimeout(() => {
+        if (msg.type === 'AUTH_RESULT') {
+          if (msg.ok && typeof msg.expiresAtMs === 'number') {
+            forcedRefresh = false;
+            if (reauthTimer) clearTimeout(reauthTimer);
+            const lead = 5 * 60 * 1000;
+            const delay = Math.max(30_000, msg.expiresAtMs - Date.now() - lead);
+            reauthTimer = setTimeout(() => {
+              const live = socketRef.current;
+              if (live && live.readyState === WebSocket.OPEN) authenticate(live);
+            }, delay);
+          } else if (!forcedRefresh) {
+            /**
+             * The server refused the token we hold, and this branch used to be
+             * absent entirely -- the message was dropped, no timer was set, and
+             * the socket stayed open and permanently anonymous while every
+             * score submitted on it was discarded.
+             *
+             * Re-sending would fail identically, because the SDK serves its
+             * cached copy while the client's own clock says it is valid. So
+             * mint a genuinely fresh one, once. If that is refused too the
+             * credential is not the problem and retrying cannot fix it.
+             */
+            forcedRefresh = true;
             const live = socketRef.current;
-            if (live && live.readyState === WebSocket.OPEN) authenticate(live);
-          }, delay);
+            if (live && live.readyState === WebSocket.OPEN) authenticate(live, true);
+          }
         }
 
         // The server dropped our identity because the token behind it expired.
@@ -168,7 +227,23 @@ export function useLiveData(): LiveData {
         if (msg.type === 'STANDINGS_UPDATE') setStandings(msg.standings);
 
         if (msg.type === 'SCORE_REJECTED') {
-          console.warn('[WREACT] Score rejected by server:', msg.reason);
+          /**
+           * A score refused for identity is not the player's fault, and this
+           * used to be a console warning -- the run was gone, while the time
+           * stayed on screen as though it had counted.
+           *
+           * REST proves identity per request, so it succeeds exactly where the
+           * socket failed. Every other reason -- rate limited, implausible --
+           * is a decision the server meant to make, and replaying it would
+           * only ask twice.
+           */
+          const replay =
+            msg.reason === 'unauthenticated' ? pendingScoresRef.current.shift() : undefined;
+          if (replay) {
+            void postScore(replay);
+          } else {
+            console.warn('[WREACT] Score rejected by server:', msg.reason);
+          }
         }
 
         if (msg.type === 'MATCHDAY_ROLLOVER') {
@@ -227,7 +302,16 @@ export function useLiveData(): LiveData {
     // to have died and the moment the player is about to post a score.
     const onVisibility = () => {
       if (document.visibilityState !== 'visible') return;
-      if (socketRef.current?.readyState === WebSocket.OPEN) return;
+      const live = socketRef.current;
+      if (live?.readyState === WebSocket.OPEN) {
+        // A surviving socket is not necessarily a credentialed one. A
+        // backgrounded webview throttles or suspends long timers, so the
+        // pre-expiry refresh may simply never have run -- and resume is the
+        // moment before the player posts a score, the worst possible time to
+        // find that out.
+        authenticate(live);
+        return;
+      }
       if (retryTimer) clearTimeout(retryTimer);
       attempt = 0;
       connect();
@@ -274,23 +358,16 @@ export function useLiveData(): LiveData {
 
   const sendScore = useCallback(async (submission: ScoreSubmission) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
+      // Held until the server answers, so a rejection can replay it rather
+      // than the run simply ceasing to exist. Bounded: nothing drains this
+      // when submissions are accepted, which is the normal case.
+      pendingScoresRef.current.push(submission);
+      if (pendingScoresRef.current.length > 5) pendingScoresRef.current.shift();
       socketRef.current.send(JSON.stringify({ type: 'SUBMIT_SCORE', payload: submission }));
       return;
     }
 
-    // The REST fallback proves identity per request, since it has no socket to
-    // have authenticated earlier.
-    const token = await getIdToken();
-    if (!token) return;
-
-    apiFetch('/api/score', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(submission),
-    }).catch(() => {});
+    await postScore(submission);
   }, []);
 
   return {

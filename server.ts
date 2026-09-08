@@ -253,6 +253,8 @@ interface SocketState {
   windowResetAt: number;
   /** Submissions attempted without a verified identity. */
   unauthAttempts: number;
+  /** When the last of those happened, so the counter can forgive paced play. */
+  lastUnauthAtMs: number;
   /** Heartbeat liveness: cleared on each ping, set by the client's pong. */
   alive: boolean;
   /**
@@ -267,6 +269,14 @@ interface SocketState {
 }
 
 const socketState = new WeakMap<WebSocket, SocketState>();
+
+/**
+ * How long an unauthenticated submission counts toward the flood guard.
+ *
+ * Comfortably longer than a Firebase token refresh, and far shorter than the
+ * gap between two honestly played rounds.
+ */
+const UNAUTH_DECAY_MS = 15_000;
 
 /**
  * The verified identity on this socket, or null if it never had one or the
@@ -685,6 +695,7 @@ wss.on('connection', (ws, req) => {
     messages: 0,
     windowResetAt: Date.now() + 10_000,
     unauthAttempts: 0,
+    lastUnauthAtMs: 0,
     alive: true,
     authExpiresAtMs: 0,
   });
@@ -748,7 +759,18 @@ wss.on('connection', (ws, req) => {
           // flood means serializing a response per message, which is exactly
           // the work an attacker wants us doing — a disconnect costs us one
           // operation and costs them the connection.
-          state && (state.unauthAttempts += 1);
+          //
+          // The counter decays, because without it the guard punished the
+          // recovery it had just asked for: a token refresh can take a couple
+          // of seconds, and four rounds played across a whole session used to
+          // accumulate into a disconnect. A flood arrives inside the window;
+          // paced play does not.
+          if (state) {
+            const now = Date.now();
+            if (now - state.lastUnauthAtMs > UNAUTH_DECAY_MS) state.unauthAttempts = 0;
+            state.lastUnauthAtMs = now;
+            state.unauthAttempts += 1;
+          }
           if (!state || state.unauthAttempts > 3) {
             ws.close(1008, 'Unauthenticated');
             return;
@@ -925,7 +947,21 @@ wss.on('connection', (ws, req) => {
       }
 
       if (data.type === 'DUEL_TAP') {
-        if (!authedUid(ws)) return;
+        if (!authedUid(ws)) {
+          /**
+           * This was a bare `return`, and the silence cost both players the
+           * duel: the client marks itself as having tapped before it sends,
+           * and only a fresh countdown clears that, so the tap could never be
+           * repeated. The room then sat until the reap timeout and ended as
+           * abandoned for the opponent too, who had done nothing wrong.
+           *
+           * Say so instead, and let the client re-prove itself and tap again
+           * inside the same round.
+           */
+          ws.send(JSON.stringify({ type: 'REAUTH_REQUIRED' }));
+          ws.send(JSON.stringify({ type: 'DUEL_TAP_REJECTED', reason: 'unauthenticated' }));
+          return;
+        }
 
         const { roomId, reactionMs } = data.payload || {};
         const room = typeof roomId === 'string' ? duelRooms.get(roomId) : undefined;
@@ -998,7 +1034,9 @@ wss.on('connection', (ws, req) => {
         }
       }
     } catch (err) {
-      console.error('WebSocket message parsing error:', err);
+      // Name only: a JSON syntax error quotes the offending input, and the
+      // frame that most often fails to parse is the one carrying a token.
+      console.error('WebSocket message parsing error:', err instanceof Error ? err.name : 'unknown');
     }
   });
 

@@ -62,6 +62,7 @@ export const LiveDuelLobby: React.FC<LiveDuelLobbyProps> = ({
   useEffect(() => {
     let disposed = false;
     let retry: ReturnType<typeof setTimeout> | null = null;
+    let reauthTimer: ReturnType<typeof setTimeout> | null = null;
     let attempt = 0;
 
     const connect = () => {
@@ -115,12 +116,44 @@ export const LiveDuelLobby: React.FC<LiveDuelLobbyProps> = ({
           }
         }
 
+        /**
+         * Refresh ahead of expiry, exactly as the live-data socket does.
+         *
+         * This handler was missing, so the duel socket only ever recovered
+         * after a failure -- and a duel has no room for that: the credential
+         * can lapse between joining and the signal, and the tap that lands
+         * afterwards is the whole round.
+         */
+        if (data.type === 'AUTH_RESULT' && data.ok && typeof data.expiresAtMs === 'number') {
+          if (reauthTimer) clearTimeout(reauthTimer);
+          const delay = Math.max(30_000, data.expiresAtMs - Date.now() - 5 * 60 * 1000);
+          reauthTimer = setTimeout(() => {
+            const live = socketRef.current;
+            if (live && live.readyState === WebSocket.OPEN) {
+              getIdToken().then((token) => {
+                if (token && live.readyState === WebSocket.OPEN) {
+                  live.send(JSON.stringify({ type: 'AUTH', token }));
+                }
+              });
+            }
+          }, delay);
+        }
+
+        // The tap was refused because identity had lapsed, not because the
+        // duel is over. REAUTH_REQUIRED arrives alongside this, so clearing
+        // the guard lets the player tap again in the same round.
+        if (data.type === 'DUEL_TAP_REJECTED') {
+          tappedRef.current = false;
+        }
+
         if (data.type === 'DUEL_REJECTED') {
           setStatus('IDLE');
           setNotice(
             data.reason === 'rate_limited'
               ? 'Too many duels just now. Give it a minute.'
-              : 'Could not join a duel. Check your connection and try again.'
+              : data.reason === 'unauthenticated'
+                ? 'Reconnecting your session. Try that again.'
+                : 'Could not join a duel. Check your connection and try again.'
           );
         }
 
@@ -178,6 +211,7 @@ export const LiveDuelLobby: React.FC<LiveDuelLobbyProps> = ({
     return () => {
       disposed = true;
       if (retry) clearTimeout(retry);
+      if (reauthTimer) clearTimeout(reauthTimer);
       socketRef.current?.close();
       socketRef.current = null;
     };

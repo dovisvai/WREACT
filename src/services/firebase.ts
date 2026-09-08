@@ -124,12 +124,18 @@ export function ensureSignedIn(): Promise<User | null> {
  *
  * The SDK refreshes this transparently when it is close to expiry, so callers
  * can ask for one before every submission without managing the lifecycle.
+ *
+ * `forceRefresh` exists for one case: the server rejected the token we hold.
+ * The cached copy would then be re-sent forever -- the SDK considers it valid
+ * because the client's own clock says so -- so a rejection needs a genuinely
+ * new token rather than another look at the same one. It costs a network
+ * round-trip, so it is never the default.
  */
-export async function getIdToken(): Promise<string | null> {
+export async function getIdToken(forceRefresh = false): Promise<string | null> {
   const user = await ensureSignedIn();
   if (!user) return null;
   try {
-    return await user.getIdToken();
+    return await user.getIdToken(forceRefresh);
   } catch (err) {
     console.warn('[Firebase] Could not mint an ID token:', err);
     return null;
