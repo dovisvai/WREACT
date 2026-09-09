@@ -132,7 +132,7 @@ export const PREVIEW_OFFERING: RevenueCatOfferingData = {
         identifier: PRODUCT_IDS.monthly,
         title: 'WREACT Pro — Monthly',
         description:
-          'Unlimited duels, full reaction telemetry, no ads, and a verified badge on the world standings.',
+          'Your complete run history, a supporter mark on your profile, and direct support for an independent developer.',
         price: 3.99,
         priceString: '$3.99',
         currencyCode: 'USD',

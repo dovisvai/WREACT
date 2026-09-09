@@ -18,11 +18,27 @@ interface MonetizationModalProps {
   onActivateProPass?: () => void;
 }
 
+/**
+ * What Pro actually delivers. Every line here is backed by code.
+ *
+ * This list used to promise unlimited duels, full telemetry, a verified mark
+ * in the standings and no ads. Nothing gated on the entitlement at all — duels
+ * are rate-limited identically for everyone, history was eight rows for
+ * everyone, no leaderboard renders a Pro marker, and there are no ads to be
+ * spared. Four paid claims, zero implementations.
+ *
+ * Two were dropped rather than built. "Unlimited duels" would have meant
+ * inventing a free-tier cap purely so Pro could lift it, which makes the free
+ * game worse to sell the fix. A "verified mark in the standings" would have to
+ * be asserted by the client, since the server has no idea who subscribes — a
+ * badge the app cannot justify, in a product whose rule is that it never shows
+ * a number or a claim it cannot stand behind.
+ */
 const PRO_BENEFITS = [
-  'Unlimited 1v1 duels',
-  'Full reaction telemetry and trend history',
-  'Verified mark beside your name in the standings',
-  'No ads, ever',
+  'Your complete run history, not just the last eight',
+  'A supporter mark on your profile',
+  'No ads — in the free game either, and that is a promise not a feature',
+  'You directly fund an independent developer',
 ];
 
 type Status = { text: string; tone: 'success' | 'info' | 'error' } | null;
@@ -147,10 +163,30 @@ export const MonetizationModal: React.FC<MonetizationModalProps> = ({
   const annualSavingPercent = (pkg: RevenueCatPackageInfo): number | null => {
     if (pkg.packageType !== 'ANNUAL') return null;
 
-    const monthly = offering?.availablePackages.find((p) => p.packageType === 'MONTHLY');
+    // The cheapest monthly, not the first one found. `find` took whichever the
+    // dashboard happened to list first, so adding a decoy tier there silently
+    // doubled the advertised saving with no code change.
+    const monthlyCandidates = offering?.availablePackages.filter(
+      (p) => p.packageType === 'MONTHLY' && p.product.price > 0
+    );
+    const monthly = monthlyCandidates?.reduce(
+      (cheapest: RevenueCatPackageInfo | null, p) =>
+        !cheapest || p.product.price < cheapest.product.price ? p : cheapest,
+      null
+    );
+
     const monthlyPrice = monthly?.product.price;
     const annualPrice = pkg.product.price;
     if (!monthlyPrice || !annualPrice) return null;
+
+    // Never compare across currencies. Play sets its own price points per
+    // market, so a ¥600 monthly against a $29.99 annual computed "SAVE 99%".
+    if (monthly && monthly.product.currencyCode !== pkg.product.currencyCode) return null;
+
+    // Finite and positive, so an absent or malformed price cannot produce a
+    // 100% or 162% badge.
+    if (!Number.isFinite(monthlyPrice) || !Number.isFinite(annualPrice)) return null;
+    if (monthlyPrice <= 0 || annualPrice <= 0) return null;
 
     // Compare like with like: a year of the monthly plan against the annual one.
     const yearAtMonthlyRate = monthlyPrice * 12;
@@ -169,9 +205,20 @@ export const MonetizationModal: React.FC<MonetizationModalProps> = ({
     // WREACT sells no lifetime product, but the SDK's package type union
     // includes one and the offering comes from a dashboard we do not control at
     // runtime -- so label it correctly rather than calling it "per month".
-    if (pkg.packageType === 'LIFETIME') return 'one time';
-    if (pkg.packageType === 'ANNUAL') return 'per year';
-    return 'per month';
+    // Every non-annual type fell through to "per month", so a weekly tier added
+    // in the dashboard would have rendered "$2.99 / per month" on a live store
+    // listing — a false price, with no code change required to trigger it.
+    switch (pkg.packageType) {
+      case 'LIFETIME':
+        return 'one time';
+      case 'ANNUAL':
+        return 'per year';
+      case 'MONTHLY':
+        return 'per month';
+      default:
+        // An unknown cadence: say nothing about the period rather than guess.
+        return '';
+    }
   };
 
   return (
@@ -207,8 +254,8 @@ export const MonetizationModal: React.FC<MonetizationModalProps> = ({
                 Pro is active
               </h3>
               <p className="mt-2 text-sm text-ink-muted">
-                Everything is unlocked. Manage or cancel any time in your store account
-                settings.
+                Your full run history is unlocked and your profile carries a supporter
+                mark. Manage or cancel any time in your store account settings.
               </p>
             </div>
           ) : (

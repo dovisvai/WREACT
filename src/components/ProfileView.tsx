@@ -288,9 +288,23 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
             {history.length > 0 && (
               <Panel className="p-4">
-                <Label as="h2">Recent runs</Label>
+                <div className="flex items-baseline justify-between">
+                  <Label as="h2">{profile.proPassActive ? 'Run history' : 'Recent runs'}</Label>
+                  {profile.proPassActive && history.length > 8 && (
+                    <span className="text-[10px] uppercase tracking-wider text-gold">
+                      {history.length} runs
+                    </span>
+                  )}
+                </div>
+                {/*
+                  The full log is the one thing Pro actually delivers, so it is
+                  a real difference rather than a chip: free keeps the last 8,
+                  Pro keeps everything the profile holds. The paywall used to
+                  promise "full reaction telemetry and trend history" while
+                  every player got the same eight rows.
+                */}
                 <div className="mt-3 space-y-1.5">
-                  {history.slice(0, 8).map((run) => (
+                  {(profile.proPassActive ? history : history.slice(0, 8)).map((run) => (
                     <div
                       key={run.id}
                       className="flex items-center justify-between border-b border-pitch-700/60 pb-1.5 last:border-0"
@@ -305,6 +319,15 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     </div>
                   ))}
                 </div>
+                {!profile.proPassActive && history.length > 8 && (
+                  <button
+                    type="button"
+                    onClick={openMonetizationModal}
+                    className="mt-3 w-full rounded-md border border-pitch-700 py-2 text-[11px] font-semibold uppercase tracking-wider text-ink-faint hover:text-ink"
+                  >
+                    {history.length - 8} older runs — unlock with Pro
+                  </button>
+                )}
               </Panel>
             )}
           </div>
@@ -372,7 +395,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           </Label>
           <Panel className="divide-y divide-pitch-700">
             {!profile.proPassActive && (
-              <RowButton label="WREACT Pro" hint="Unlimited duels, full telemetry" onClick={openMonetizationModal} />
+              <RowButton label="WREACT Pro" hint="Full run history, and back the project" onClick={openMonetizationModal} />
             )}
             {profile.isLoggedIn && <RowButton label="Manage sign-in" onClick={openAuthModal} />}
             <RowButton

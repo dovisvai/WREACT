@@ -4,7 +4,7 @@ Living record of where this project actually stands. Updated after each
 completed task, so any session (or person) can pick up without re-deriving
 everything.
 
-**Last updated:** 2026-09-08 · matchday 6 · versionCode 2 built and signed, awaiting upload
+**Last updated:** 2026-09-09 · matchday 6 · versionCode 3 built and signed, awaiting upload
 
 ---
 
@@ -93,9 +93,36 @@ Console beyond these two subscriptions.
     dead sockets, so it is rare in practice. If a tester reports scores silently
     stopping, this is why. Fixed in versionCode 2.
 - [x] **Firestore rules deployed and emulator-tested.**
-- [x] **versionCode 2 / 1.0.1 built and signed** (`c0f4d40`). `jar verified`, 7.38 MB,
-  and the shipped JS was unpacked and checked to actually contain the fixes rather
-  than assumed to. **Not yet uploaded** — this is the next Play Console action.
+- [x] **versionCode 3 / 1.0.2 built and signed.** `jar verified`, 7.38 MB, and the
+  shipped JS was unpacked and checked to actually contain the fixes rather than
+  assumed to. **Not yet uploaded** — this is the next Play Console action.
+  versionCode 2 was superseded before upload and must not be used: it predates
+  the full-review round below.
+- [x] **Firestore rules redeployed** (2026-09-09) with the tightened country check,
+  emulator-verified before release.
+
+### Full-game review round (2026-09-09)
+
+Five parallel reviews — game modes, ranking integrity, monetization, player data,
+sharing/push. Highest-severity findings, all fixed and most verified by execution:
+
+- **A sanctioned or invented nation could hold world #1.** The Firestore read path
+  was the one ingest that never ran `sanitizeCountry`, and the rules behind it only
+  checked that a code was 2-3 characters. `"RUS"`, `"RU "`, `"XX"` and `"  "` each
+  minted a real qualifying row. Now validated against the 198 shipped codes plus the
+  restricted list, dropping what it cannot trust; the rules require `^[A-Z]{2}$`.
+- **No player's personal best ever advanced.** `pb_` was written before the handler
+  that reads it, so a new best was compared against itself. `bestScore` sat at 0
+  forever, three badges were unreachable, and the contribution panel reported 0ms on
+  exactly the runs that moved a national average.
+- **Double-tapping Start scored a run nobody played.** Sequence and Stroop have no
+  WAITING phase and Start fires on release; the whole button overlaps tiles 3-4.
+  In Stroop that recorded ~90-150ms against a 750ms target.
+- **Switching tabs mid-run voided the daily entry** and the streak with it.
+- **Every share link was dead** — `wreact.app` is not registered. Links now point at
+  the GitHub Pages site, which decodes the payload and hands the recipient onward.
+- **The paywall sold four benefits and the code delivered none.** Full run history is
+  now genuinely Pro-only; the copy sells only what exists.
 
 ### The auth lifecycle round (`c0f4d40`)
 
@@ -282,6 +309,12 @@ What was actually exercised, so nothing gets re-claimed on the strength of a cod
 | Web key still works | Live call accepted (created one stray anonymous user) |
 | Auth gate after token changes | Bad token → `AUTH_RESULT ok=false`, then `REAUTH_REQUIRED` + rejection on both scores and duels |
 | FCM config in the bundle | `google_app_id` present in generated resources |
+| Country validator closed | Ran every bypass string: `RUS`/`RU `/`XX`/`  `/`ZZZ` rejected, `LT`/`US`/`GB`/`  lt  ` accepted |
+| Tightened rules do not break real writes | Firestore emulator with REQUEST_TIME transforms: `LT`/`US`/`GB` allowed, `RUS`/`RU `/`  `/`ZZZ`/`KP` denied |
+| Personal best advances | Replayed the submit ordering across storage-working and storage-dead runs: 320→240→198 now yields 198, was 0 |
+| Savings badge cannot overstate | Exercised cross-currency, decoy-tier, Infinity and negative prices — all now produce no badge |
+| Challenge landing page is safe | Driven in a real browser with hostile payloads; caught a `__proto__` lookup returning `Object.prototype` |
+| v3 bundle contains the fixes | Unpacked the AAB and asserted each change present and each old claim absent |
 | Unauthed duel tap is answered | Live socket → `REAUTH_REQUIRED` → `DUEL_TAP_REJECTED` (was silence) |
 | Flood counter forgives paced play | 3 attempts, 16s gap, 3 more → socket stayed open |
 | Flood counter still stops a burst | 8 frames back to back → `CLOSED 1008` |
