@@ -27,7 +27,7 @@ Firebase (anonymous auth + Firestore) · Capacitor 8 · RevenueCat · OneSignal.
 | | |
 |---|---|
 | Package / appId | `com.wreact.app` |
-| Version | `versionCode 1`, `versionName "1.0"` |
+| Version | `versionCode 3`, `versionName "1.0.2"` (built, not yet uploaded) |
 | SDK | min 24, compile/target 36 |
 | Backend | `https://wreact-production.up.railway.app` (Railway, Docker, **1 replica**) |
 | Firebase project | `gen-lang-client-0063491611` |
@@ -72,7 +72,7 @@ Console beyond these two subscriptions.
 | `VITE_ONESIGNAL_APP_ID` | set |
 | `VITE_REVENUECAT_ANDROID_KEY` | **unset** — paywall refuses by design |
 | `VITE_REVENUECAT_IOS_KEY` | unset (iOS deferred) |
-| `VITE_SHARE_ORIGIN` | unset — falls back to `https://wreact.app` |
+| `VITE_SHARE_ORIGIN` | unset — now falls back to `https://dovisvai.github.io/WREACT`. The old `wreact.app` fallback was a domain nobody owns, so every shared link resolved to a DNS error. Set this if a real domain is ever registered. |
 
 ---
 
